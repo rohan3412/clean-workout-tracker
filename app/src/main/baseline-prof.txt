@@ -1,0 +1,15 @@
+# Clean's own code, compiled ahead of time once the phone has installed the profile (the profile installer in the APK does that on a
+# sideloaded install too; Android compiles it when the phone is idle and charging, or at once with
+# `adb shell cmd package compile -m speed-profile -f clean.app`). Without it the app's code is interpreted and JIT-compiled anew after
+# every update, which is most of a cold start. Written by hand with wildcards, as the generated kind needs a device to record on.
+HSPLclean/app/**->**(**)**
+HSPLclean/core/**->**(**)**
+Lclean/app/**;
+Lclean/core/**;
+# Compose libraries ship their own rules; Material 3's are few, and every screen here is built from it.
+HSPLandroidx/compose/material3/**->**(**)**
+Landroidx/compose/material3/**;
+# The database and the flows every screen reads.
+HSPLandroidx/room/**->**(**)**
+Landroidx/room/**;
+HSPLkotlinx/coroutines/flow/**->**(**)**

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- In the dark: black, so opening the app is not a white flash. The app tells Android which of the two it is using (MainActivity). -->
+    <style name="Theme.Clean" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/launch_background</item>
+    </style>
+</resources>

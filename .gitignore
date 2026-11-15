@@ -1,0 +1,56 @@
+# Personal data and the reference app binary stay local
+original/
+node_modules/
+dist/
+
+# Android / Gradle
+.gradle/
+.kotlin/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Built apps: published as release or workflow files, never committed
+*.apk
+*.aab
+*.apks
+*.ipa
+
+# Signing keys and anything holding passwords
+*.jks
+*.keystore
+*.p12
+*.pem
+keystore.properties
+signing.properties
+.env
+.env.*
+
+# Personal files that must never be bundled (exercise animations stay on the phone)
+animations/
+*.gif
+
+# Later iOS target (docs/ios-plan.md); harmless until then
+xcuserdata/
+DerivedData/
+*.xcuserstate
+Pods/
+.build/
+
+# Editors, OS and tools
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+__pycache__/
+*.pyc
+*.hprof
+
+# JVM crash logs
+hs_err_pid*.log
+replay_pid*.log
+

@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Clean</string>
+    <string name="widget_today_description">Today\'s template with a Start button, the days of this week and the week streak.</string>
+</resources>

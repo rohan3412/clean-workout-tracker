@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the "shared" folder of the cache can be lent to another app, and "camera", where the camera app writes a photo being taken (Photos.kt). -->
+<paths>
+    <cache-path
+        name="shared"
+        path="shared/" />
+    <cache-path
+        name="camera"
+        path="camera/" />
+</paths>

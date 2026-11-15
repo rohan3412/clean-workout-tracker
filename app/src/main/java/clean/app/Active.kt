@@ -1,0 +1,2288 @@
+package clean.app
+
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.runtime.mutableStateListOf
+import clean.app.ui.theme.numbers
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.requiredSizeIn
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.unit.Dp
+import clean.core.setLabels
+import clean.core.numbered
+import clean.core.roundCounts
+import clean.core.roundKind
+import clean.core.acceptHints
+import clean.core.carriedSets
+import clean.core.setsAbove
+import clean.core.focusAfter
+import clean.core.focusStart
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextOverflow
+
+import kotlinx.coroutines.flow.distinctUntilChanged
+import androidx.compose.runtime.snapshotFlow
+import clean.core.WARMUP_SCHEMES
+import clean.core.warmupSets
+import clean.core.PrKind
+import clean.core.parseRestPresets
+import androidx.compose.material3.AssistChip
+import androidx.compose.runtime.produceState
+import androidx.compose.animation.ExitTransition
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.snap
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.layout.PaddingValues
+import clean.app.ui.theme.SheetTopShape
+import clean.app.ui.theme.SmallShape
+import clean.app.ui.theme.cardShape
+import clean.app.ui.theme.LocalLook
+import clean.app.ui.theme.LocalCleanColors
+import clean.app.ui.theme.workoutSkin
+import androidx.compose.foundation.BorderStroke
+import kotlinx.coroutines.delay
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.border
+import clean.core.weightStep
+import clean.core.nextTarget
+import clean.core.Progression
+import clean.core.nextFor
+import clean.core.parseGoal
+import clean.core.goalReachedOn
+import clean.core.exerciseGoalProgress
+import clean.core.Target
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import clean.core.BODYWEIGHT_WINDOW_DAYS
+import clean.core.ExerciseRecords
+import clean.core.LoadType
+import clean.core.SetType
+import clean.core.Workout
+import clean.core.decimalText
+import clean.core.OneRm
+import clean.core.PrSet
+import clean.core.Side
+import clean.core.SideRecords
+import clean.core.SidedBests
+import clean.core.nextForSides
+import clean.core.prBestsBySide
+import clean.core.kgToLb
+import clean.core.recordsBySide
+import clean.core.sidesOf
+import clean.core.pairHolding
+import clean.core.setsToAddPair
+import clean.core.sidePairs
+import clean.core.startsSidesRest
+import clean.core.shortNumber
+
+/** The buzz under a set just ticked (kv `feedback.tick`): none, a light tick, or a short vibration. */
+internal fun tickBuzz(haptic: androidx.compose.ui.hapticfeedback.HapticFeedback, level: String) {
+    when (level) {
+        "off" -> {}
+        "strong" -> Feedback.pulse(40)
+        else -> haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+    }
+}
+
+/**
+ * A set row (or a round) with the swipes of Settings, Workout, Layout (kv `swipe.right`, `swipe.left`: finish, delete or off).
+ * Finishing is the box's own tick, so hints are accepted and the rest starts as for a tap; on a set already done the
+ * same swipe un-ticks it, like the checkbox. The buzz at the threshold is the tick's (`feedback.tick`).
+ */
+@Composable
+private fun SetSwipe(done: Boolean, onTick: () -> Unit, onRemove: () -> Unit, content: @Composable () -> Unit) {
+    val feel = LocalFeel.current
+    val colors = LocalCleanColors.current
+    fun action(kind: String) = when (kind) {
+        "finish" -> SwipeAction(if (done) "Not done" else "Done", CleanIcons.Check, colors.done, false, onTick)
+        "delete" -> SwipeAction("Remove", CleanIcons.Delete, colors.danger, true, onRemove)
+        else -> null
+    }
+    SwipeRow(left = action(feel.swipeLeft), right = action(feel.swipeRight), buzz = { tickBuzz(it, feel.tick) }, content = content)
+}
+
+/** Whether a swipe set to [kind] in Settings, Workout, Layout removes an exercise when made on its name: only "delete" does. */
+internal fun removesExercise(kind: String) = kind == "delete"
+
+/** [content] in a [SwipeRow], which takes no sideways drag while it has no swipe to make (focus mode, or both swipes off). */
+@Composable
+private fun OptionalSwipe(left: SwipeAction?, right: SwipeAction?, content: @Composable () -> Unit) {
+    val tick = LocalFeel.current.tick
+    SwipeRow(left = left, right = right, buzz = { tickBuzz(it, tick) }, content = content)
+}
+
+/** Set rows without the Previous column (kv `workout.rows` = compact; Settings, Workout, Layout). */
+private val LocalDense = staticCompositionLocalOf { false }
+
+/**
+ * What focus mode shows of the set to do next in a card, and what its Done button does: the same tick the row's own box does.
+ * [side] is "Left" or "Right" for a half of a pair; [weight] and [reps] are the typed values, else the hint the row shows in grey.
+ */
+private class FocusInfo(
+    val number: Int, val total: Int, val side: String?, val weight: String, val reps: String, val weightTyped: Boolean, val repsTyped: Boolean,
+    val weightUnit: String, val repsUnit: String, val last: String?, val spoken: String, val onEdit: (Boolean) -> Unit, val onDone: () -> Unit,
+    /** "+" before the weight of a weighted bodyweight exercise and "−" before an assisted one, as the hint and the goal line write it. */
+    val weightSign: String = "",
+)
+
+/** A card hands its next set to the page that holds it (focus mode), which draws it large above the card. */
+private class FocusSlot {
+    var info by mutableStateOf<FocusInfo?>(null)
+}
+
+/** A stored weight as text for an entry box: exact in kg, nearest half pound in lb. */
+fun entryWeight(kg: Double, unit: String): String =
+    if (unit == "lb") shortNumber(kgToLb(kg)) else decimalText(kg).removeSuffix(".0")
+
+/** The workout the cards below belong to; null is the workout in progress (`AppModel.liveSlot`). */
+private val LocalDraftSlot = staticCompositionLocalOf<AppModel.DraftSlot?> { null }
+
+/** The number pad's keys acting on the set it is on, in the workout of [slot]; [keys] are its cards' ids, in order. */
+private class PadActions(val pad: Pad, val slot: AppModel.DraftSlot, val keys: () -> List<String>) {
+    /** Changes the set the pad is on. */
+    fun set(change: (DraftSet) -> DraftSet) {
+        val t = pad.target ?: return
+        val current = slot.draft ?: return
+        val at = keys().indexOf(t.card)
+        val block = current.blocks.getOrNull(at) ?: return
+        val item = block.items.getOrNull(t.item) as? DraftSet ?: return
+        val items = block.items.toMutableList().also { it[t.item] = change(item) }
+        slot.put(current.copy(blocks = current.blocks.toMutableList().also { it[at] = block.copy(items = items) }))
+    }
+
+    fun edit(change: (String) -> String) {
+        val reps = pad.target?.reps ?: return
+        set { s -> if (reps) s.copy(reps = change(s.reps).take(8)) else s.copy(weight = change(s.weight).take(8)) }
+    }
+
+    fun key(key: String) {
+        val fresh = pad.fresh
+        val meta = pad.meta
+        when (key) {
+            "back" -> edit { if (fresh) "" else it.dropLast(1) }
+            "." -> if (meta.decimal) edit { old -> (if (fresh) "" else old).let { if ('.' in it) it else it.ifEmpty { "0" } + "." } }
+            // A step up or down starts from what the box shows, which for an empty one is last time's value.
+            "+", "-" -> edit { old ->
+                val now = parseNumber(old.ifEmpty { meta.hint }) ?: 0.0
+                shortNumber((now + if (key == "+") meta.step else -meta.step).coerceAtLeast(0.0))
+            }
+            // The value of the same box in the set above.
+            "same" -> if (meta.above.isNotEmpty()) edit { meta.above }
+            else -> edit { (if (fresh) "" else it) + key }
+        }
+        // After a step (or "Same") the next digit still starts afresh; after anything typed it adds on.
+        pad.fresh = key == "+" || key == "-" || key == "same"
+    }
+
+    /** Weight, then reps, then the next set's weight, into the next exercise; after the last box the pad closes. */
+    fun next() {
+        val t = pad.target ?: return
+        val current = slot.draft ?: return
+        if (!t.reps) return pad.focus(t.card, t.item, true)
+        val keys = keys()
+        val at = keys.indexOf(t.card)
+        val later = current.blocks.getOrNull(at)?.items.orEmpty().withIndex().firstOrNull { it.index > t.item && it.value is DraftSet }
+        val first = current.blocks.getOrNull(at + 1)?.items?.indexOfFirst { it is DraftSet } ?: -1
+        when {
+            later != null -> pad.focus(t.card, later.index, false)
+            first >= 0 -> pad.focus(keys[at + 1], first, false)
+            else -> pad.close()
+        }
+    }
+}
+
+@Composable
+fun ActiveScreen(model: AppModel) {
+    val draft = model.draft
+    if (draft == null) {
+        // Only while this page is the one on top: as it slides away it must not take the page under it along.
+        LaunchedEffect(Unit) { if (model.stack.lastOrNull() == Screen.Active) model.back() }
+        return
+    }
+    // Asked once, at the first workout, for the notification that shows it on the lock screen (Android 13 and later); refused, it stays off.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val askNotice = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) model.setOption("workout.notif", "off")
+    }
+    LaunchedEffect(Unit) {
+        val o = model.options.value
+        if (android.os.Build.VERSION.SDK_INT >= 33 && clean.core.workoutNotifOn(o["workout.notif"]) && o["workout.notif.asked"] == null &&
+            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            model.setOption("workout.notif.asked", "yes")
+            askNotice.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+    val workouts by model.workouts.collectAsState()
+    var picking by remember { mutableStateOf(false) }
+    var confirm by remember { mutableStateOf<String?>(null) }
+    // Read once and flipped when the five minutes are up; the ticking clock is read only where a time is shown,
+    // so the whole screen is not redrawn every second.
+    val early by produceState(draft.isEarly(System.currentTimeMillis()), draft.startMillis) {
+        val left = draft.startMillis + 5 * 60_000 - System.currentTimeMillis()
+        if (left > 0) delay(left)
+        value = false
+    }
+    val highlight = model.flag("workout.highlight")
+    val next = if (highlight) nextBlock(draft) else null
+    // What was just removed can be put back from the app's one Undo bar.
+    val offerUndo = { what: String, restore: () -> Unit -> model.say(what) { restore() } }
+    // After a set is ticked the card with the next one comes into view.
+    val stored by model.options.collectAsState()
+    // Layout (Settings, Workout): one exercise at a time or the whole list, set rows with or without last time, content low on the screen.
+    val focus = (stored["workout.focus"] ?: "off") == "on"
+    val oneHand = stored["workout.oneHand"] == "on"
+    val dense = stored["workout.rows"] == "compact"
+    val list = rememberLazyListState()
+    val moving = LocalMotion.current
+    LaunchedEffect(next, focus) { if (!focus && next != null && draft.lastDoneMillis != null) { if (moving) list.animateScrollToItem(next + 1) else list.scrollToItem(next + 1) } }
+    // Focus mode: a page per exercise, then a last page for adding one. It opens on the first exercise with a set to do,
+    // and moves on by itself when the one on show is finished.
+    val open = draft.blocks.map { b -> b.items.any { it is DraftSet && !it.done } }
+    val pager = rememberPagerState(focusStart(open)) { draft.blocks.size + 1 }
+    if (focus) {
+        LaunchedEffect(Unit) { pager.scrollToPage(focusStart(open)) }
+        val animated = LocalMotion.current
+        val here = pager.currentPage
+        val hereOpen = open.getOrNull(here) == true
+        var wasOpen by remember(here) { mutableStateOf(hereOpen) }
+        LaunchedEffect(here, hereOpen) {
+            val to = if (wasOpen && !hereOpen) focusAfter(open, here) else null
+            wasOpen = hereOpen
+            if (to != null) {
+                // A beat to see the tick, then the next exercise's page in place (no slide).
+                if (animated) delay(Motion.SLOW.toLong())
+                pager.scrollToPage(to)
+            }
+        }
+        // An exercise just added is the one to show.
+        var count by remember { mutableStateOf(draft.blocks.size) }
+        LaunchedEffect(draft.blocks.size) {
+            if (draft.blocks.size > count) pager.scrollToPage(draft.blocks.size - 1)
+            count = draft.blocks.size
+        }
+    }
+    var restOptions by remember { mutableStateOf(false) }
+    if (restOptions) {
+        if (model.restEnd == null) restOptions = false
+        else CleanDialog(
+            onDismissRequest = { restOptions = false },
+            // The ticking clock is read in here, so the screen behind is not redrawn each second.
+            title = { Text("Rest ${clock(((model.restEnd ?: 0L) - nowMillis()).coerceAtLeast(0) / 1000)}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    Choice(listOf(-30, -15, 15, 30, 60), 0, { (if (it > 0) "+" else "−") + (if (Math.abs(it) == 60) "1 min" else "${Math.abs(it)} s") }) { model.changeRest(it) }
+                    // An exact time left, whatever it is now.
+                    RestChoice("Set the time left", null, emptyList(), { model.startRest(it, changing = true) }, custom = "Set…")
+                    // Start the rest again at a usual length.
+                    Text("Rest again for", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    RestPresets(parseRestPresets(stored["rest.presets"]), { model.startRest(it) })
+                    Text("How long the rest is to begin with is set per exercise (Rest timer, in its options) and for all exercises in Settings, which also holds these lengths.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = { TextButton(onClick = { restOptions = false }) { Text("Done") } },
+            dismissButton = { TextButton(onClick = { model.startRest(0); restOptions = false }) { Text("Skip rest") } },
+        )
+    }
+    // No unlocking the phone between sets.
+    val view = LocalView.current
+    DisposableEffect(Unit) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
+
+    // Holding an exercise's name folds every card down to its name; dragging then moves it among
+    // the others, and letting go unfolds them again. The held card is drawn where the finger is
+    // (`fingerY` against its slot in the list), so it does not jump when it swaps with a neighbour,
+    // and it swaps when its centre passes the neighbour's centre.
+    var dragIndex by remember { mutableStateOf<Int?>(null) }
+    // The card still settling into its slot after the finger lifted, and how far it is from it.
+    var dropIndex by remember { mutableStateOf<Int?>(null) }
+    var settleOffset by remember { mutableStateOf(0f) }
+    var fingerY by remember { mutableStateOf(0f) }
+    var settling by remember { mutableStateOf<Job?>(null) }
+    val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+    val motion = LocalMotion.current
+    val density = LocalDensity.current
+    // Where the finger took hold of the card, from the card's top (the middle of the name row until a card says), and how near an edge the list scrolls.
+    val grabDefault = with(density) { 34.dp.toPx() }
+    var grabPx by remember { mutableStateOf(grabDefault) }
+    val edgePx = with(density) { 72.dp.toPx() }
+    val scrollPx = with(density) { 12.dp.toPx() }
+    /** The list's entry for the card at [index]; the item before the cards is the title. */
+    fun slot(index: Int) = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index + 1 }
+    /** How far the held card is drawn from its slot. */
+    fun heldOffset(): Float = dragIndex?.let { i -> slot(i)?.let { fingerY - grabPx - it.offset } } ?: settleOffset
+    fun dragBy(dy: Float) { if (dragIndex != null) fingerY += dy }
+    fun drop() {
+        val i = dragIndex ?: return
+        settleOffset = heldOffset()
+        dragIndex = null
+        dropIndex = i
+        settling = scope.launch {
+            if (motion) Animatable(settleOffset).animateTo(0f, Motion.short()) { settleOffset = value }
+            settleOffset = 0f
+            dropIndex = null
+        }
+    }
+    LaunchedEffect(dragIndex != null) {
+        while (dragIndex != null) {
+            withFrameNanos { }
+            val i = dragIndex ?: break
+            // Near the top or bottom the list scrolls, faster the nearer the edge; the card stays under the finger.
+            val viewport = list.layoutInfo.viewportSize.height
+            val push = when {
+                fingerY < edgePx -> -(edgePx - fingerY) / edgePx
+                fingerY > viewport - edgePx -> (fingerY - (viewport - edgePx)) / edgePx
+                else -> 0f
+            }
+            if (push != 0f) list.scrollBy(push.coerceIn(-1f, 1f) * scrollPx)
+            // One step per frame, when the card's centre has passed the neighbour's centre.
+            val me = slot(i) ?: continue
+            val centre = fingerY - grabPx + me.size / 2f
+            val below = slot(i + 1)
+            val above = slot(i - 1)
+            val by = when {
+                below != null && centre > below.offset + below.size / 2f -> 1
+                above != null && centre < above.offset + above.size / 2f -> -1
+                else -> 0
+            }
+            if (by != 0) {
+                model.moveExercise(i, by)
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                dragIndex = i + by
+            }
+        }
+    }
+
+    // A card is known by its own id, so it glides when the order changes and the pad stays on it, even with an exercise there twice.
+    val keys = remember(draft.blocks) { cardKeys(draft.blocks) }
+
+    // Weights and reps are typed on the app's own number pad. It closes on Back, and when the phone's keyboard comes up for a name or a note.
+    val pad = remember { Pad() }
+    BackHandler(enabled = pad.target != null) { pad.close() }
+    // The inset is read outside composition, so its animation does not redraw the whole screen.
+    val ime = WindowInsets.ime
+    LaunchedEffect(ime, density) {
+        snapshotFlow { ime.getBottom(density) > 0 }.distinctUntilChanged().collect { if (it) pad.close() }
+    }
+    val keysNow by rememberUpdatedState(keys)
+    val padActions = remember(pad) { PadActions(pad, model.liveSlot) { keysNow } }
+
+    val summary = model.flag("workout.summary")
+    fun finish() {
+        val saved = model.finishWorkout()
+        if (saved != null) {
+            model.back()
+            // What the workout came to, or just a word that it is saved.
+            if (summary) model.open(Screen.Summary(saved)) else model.message = "Workout saved"
+        } else {
+            confirm = "discard"
+        }
+    }
+
+    /** A card changed (or was removed, when [changed] is null): saved, and a set just ticked starts the rest. */
+    fun blockChanged(index: Int, block: DraftBlock, changed: DraftBlock?) {
+        val current = model.draft ?: return
+        val blocks = current.blocks.toMutableList()
+        val ticked = changed != null && changed.items.count { it is DraftSet && it.done } > block.items.count { it is DraftSet && it.done }
+        if (changed == null) blocks.removeAt(index) else blocks[index] = changed
+        var after = current.copy(blocks = blocks, lastDoneMillis = if (ticked) System.currentTimeMillis() else current.lastDoneMillis)
+        // A set just ticked starts the rest, unless the turn now goes to the other exercise of a superset.
+        val partner = nextBlock(after)?.takeIf { it != index && block.superset != null && after.blocks.getOrNull(it)?.superset == block.superset }
+        if (ticked && changed != null && partner == null) {
+            // The rest depends on the kind of set just ticked; its length is kept with the set, for the export.
+            val at = changed.items.indices.lastOrNull { i -> (changed.items[i] as? DraftSet)?.done == true && (block.items.getOrNull(i) as? DraftSet)?.done != true }
+            val justDone = at?.let { changed.items[it] } as? DraftSet
+            // Left and right: the first side of a pair rests the time between sides, the second the usual rest.
+            val pair = if (at != null && changed.paired) pairHolding(changed.items.map { it is DraftSet }, at) else null
+            val otherSide = pair?.let { (left, right) -> if (left == at) right else left }
+            val seconds = if (pair != null && startsSidesRest(otherSide != null, (otherSide?.let { changed.items[it] } as? DraftSet)?.done == true)) model.restBetweenSides(block.exercise)
+            else model.restFor(block.exercise, justDone?.type ?: SetType.NORMAL, justDone?.rpe.orEmpty())
+            model.startRest(seconds)
+            if (at != null && seconds > 0) after = after.copy(blocks = after.blocks.toMutableList().also { list ->
+                list[index] = changed.copy(items = changed.items.toMutableList().also { it[at] = (it[at] as DraftSet).copy(rest = seconds) })
+            })
+        }
+        // A set or an exercise taken away can be put back for a few seconds.
+        if (changed == null) offerUndo("Exercise removed") { model.putDraft(current) }
+        else if (changed.items.count { it is DraftSet } < block.items.count { it is DraftSet }) offerUndo("Set removed") { model.putDraft(current) }
+        model.putDraft(after)
+    }
+
+    val feel = Feel(stored["feedback.tick"] ?: "light", stored["pr.celebrate"] ?: "none", stored["swipe.right"] ?: "finish", stored["swipe.left"] ?: "delete")
+    CompositionLocalProvider(LocalFeel provides feel, LocalDense provides dense) {
+    Scaffold(
+        modifier = Modifier.imePadding(), containerColor = pageContainer(),
+        topBar = {
+            val now = nowMillis()
+            Column(Modifier.sheetBelow().statusBarsPadding()) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = Space.xs), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = model::back) { Icon(CleanIcons.ChevronDown, "Minimise workout") }
+                // For the first five minutes cancelling is at hand up here, for a workout started by mistake; after that it is at the bottom.
+                if (early) DangerButton("Cancel", { confirm = "cancel" })
+                val rest = model.restEnd?.let { (it - now) / 1000 }?.takeIf { it > 0 }
+                // The rest in progress; a tap on it gives the ways to change it.
+                if (rest != null) Text(
+                    "Rest ${clock(rest)}", Modifier.weight(1f).clickable { restOptions = true }.minTouch().wrapContentHeight(Alignment.CenterVertically),
+                    textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyLarge.numbers(), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
+                )
+                else Text(
+                    draft.lastDoneMillis?.let { "Since last set  ${clock((now - it) / 1000)}" } ?: "",
+                    Modifier.weight(1f), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // Back and forth between one exercise at a time and the whole list.
+                QuietButton(
+                    if (focus) "All" else "Focus", { model.setOption("workout.focus", if (focus) "off" else "on") },
+                    Modifier.padding(end = Space.s).semantics { contentDescription = if (focus) "Show all exercises" else "Focus on one exercise" },
+                    contentPadding = PaddingValues(horizontal = Space.l, vertical = Space.s),
+                )
+                // Sets that hold values but were not ticked are asked about; empty and incomplete ones go without asking.
+                MainButton(
+                    "Finish", { if (model.validUnfinished(draft) > 0) confirm = "finish" else finish() },
+                    Modifier.padding(end = Space.s), contentPadding = PaddingValues(horizontal = Space.l, vertical = Space.s),
+                )
+            }
+            // The rest draining away, as a line under the bar.
+            val end = model.restEnd
+            if (end != null && model.restTotal > 0) {
+                val left by animateFloatAsState(((end - now) / (model.restTotal * 1000f)).coerceIn(0f, 1f), Motion.clock(), label = "rest")
+                Box(Modifier.fillMaxWidth().height(3.dp).background(MaterialTheme.colorScheme.surfaceVariant)) {
+                    Box(Modifier.fillMaxWidth(left).height(3.dp).background(MaterialTheme.colorScheme.primary))
+                }
+            }
+            }
+        },
+        bottomBar = {
+            Column {
+            AnimatedVisibility(pad.target != null, enter = Motion.appear(LocalMotion.current), exit = Motion.vanish(LocalMotion.current)) {
+                val rpeOn = model.flag("workout.rpe")
+                val rpeNow = pad.target?.let { t -> (draft.blocks.getOrNull(keys.indexOf(t.card))?.items?.getOrNull(t.item) as? DraftSet)?.rpe }.orEmpty()
+                Keypad(pad.meta, if (rpeOn) rpeNow else null, padActions::key, { value -> padActions.set { it.copy(rpe = value) } }, padActions::next, onHide = pad::close)
+            }
+            }
+        },
+    ) { padding ->
+        RestDisplay(model, draft, { restOptions = true }, Modifier.padding(padding)) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+        // One-handed: everything starts a third of the way down.
+        val low = if (oneHand) maxHeight / 3 else 0.dp
+        if (focus) FocusPages(
+            model, workouts, draft, keys, pad, next, pager, low, oneHand, offerUndo,
+            { i, b, changed -> blockChanged(i, b, changed) }, { picking = true }, if (early) null else ({ confirm = "cancel" }),
+        )
+        else LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = low)) {
+            item { WorkoutTitle(model, draft) }
+            itemsIndexed(draft.blocks, key = { i, _ -> keys[i] }) { index, block ->
+                // Kept between redraws while nothing about it changes, so a key press redraws only the card it changed.
+                val collapsed = dragIndex != null
+                val lifted = dragIndex == index
+                // Held from the pick-up until it has settled; it is not moved by the list's own placement.
+                val held = (dragIndex ?: dropIndex) == index
+                val last = draft.blocks.lastIndex
+                val isNext = next == index
+                val reorder = remember(index, collapsed, lifted, held, last, isNext) {
+                    Reorder(
+                        collapsed = collapsed, lifted = lifted, held = held, canUp = index > 0, canDown = index < last,
+                        move = { model.moveExercise(index, it) },
+                        start = { grab ->
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            settling?.cancel()
+                            settleOffset = 0f
+                            dropIndex = null
+                            // The card is held where it was touched, so it does not jump as it is picked up.
+                            grabPx = grab ?: grabDefault
+                            fingerY = (slot(index)?.offset ?: 0) + grabPx
+                            dragIndex = index
+                        },
+                        drag = ::dragBy, end = ::drop, offset = ::heldOffset,
+                        next = isNext, superset = { model.toggleSuperset(index) },
+                    )
+                }
+                val glide = if (motion && !held) Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null, placementSpec = Motion.follow()) else Modifier
+                BlockCard(model, workouts, block, reorder, keys[index], pad, glide, onSwitch = { model.switchVariation(index, it) }, onUndo = offerUndo) { changed -> blockChanged(index, block, changed) }
+            }
+            item {
+                Column(Modifier.fillMaxWidth().padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    QuietButton("Add exercise", { picking = true }, Modifier.fillMaxWidth())
+                    if (!early) DangerButton("Cancel workout", { confirm = "cancel" }, Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(120.dp))
+                }
+            }
+        }
+        }
+        }
+    }
+    }
+
+    if (picking) ExercisePicker(
+        model, workouts, onPick = { model.addExercise(it); picking = false }, onDismiss = { picking = false },
+        onPickMany = { names -> names.forEach(model::addExercise); picking = false },
+    )
+    when (val c = confirm) {
+        null -> {}
+        "cancel", "discard" -> Confirm(
+            if (c == "cancel") "Cancel workout?" else "Nothing to save",
+            if (c == "cancel") "Everything entered in this workout is thrown away." else "No set is ticked, so there is nothing to save. Discard this workout?",
+            "Discard",
+            { model.cancelWorkout() },
+        ) { confirm = null }
+        else -> CleanDialog(
+            onDismissRequest = { confirm = null },
+            title = { Text("Finish workout?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    Text("There are some valid sets in this workout that have not been marked as complete. Invalid or empty sets will be removed.")
+                    MainButton("Complete unfinished sets", { confirm = null; model.completeUnfinished(); finish() }, Modifier.fillMaxWidth())
+                    QuietButton("Discard unfinished sets", { confirm = null; finish() }, Modifier.fillMaxWidth())
+                    TextButton(onClick = { confirm = null }, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
+                }
+            },
+            confirmButton = {},
+        )
+    }
+}
+
+/** The workout's name, to rename, over the time it has run (or the day it is logged for). */
+@Composable
+private fun WorkoutTitle(model: AppModel, draft: Draft) {
+    Column(Modifier.padding(horizontal = Space.l, vertical = Space.s)) {
+        BasicTextField(
+            value = draft.name,
+            onValueChange = { model.putDraft(draft.copy(name = it)) },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.headlineSmall.copy(color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        )
+        Text(draft.pastDate?.let { "Logging for " + prettyDate(it) } ?: clock((nowMillis() - draft.startMillis) / 1000), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        NoteLine(draft.note, { model.putDraft(draft.copy(note = it)) })
+    }
+}
+
+/**
+ * Focus mode: the workout one exercise to a page, swiped between, with a last page for adding an exercise or cancelling.
+ * A page is the exercise's next set in large type with a Done button, over the exercise's ordinary card.
+ * Reordering by dragging is the list's; here the card's menu still moves an exercise.
+ */
+@Composable
+private fun FocusPages(
+    model: AppModel, workouts: List<Workout>, draft: Draft, keys: List<String>, pad: Pad, next: Int?, pager: PagerState,
+    top: Dp, oneHand: Boolean, onUndo: (String, () -> Unit) -> Unit, onChange: (Int, DraftBlock, DraftBlock?) -> Unit,
+    onAdd: () -> Unit, onCancel: (() -> Unit)?,
+) {
+    Column(Modifier.fillMaxSize()) {
+        Spacer(Modifier.height(top))
+        WorkoutTitle(model, draft)
+        HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), key = { keys.getOrNull(it) ?: "end" }) { page ->
+            val block = draft.blocks.getOrNull(page)
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                if (block != null) {
+                    val slot = remember { FocusSlot() }
+                    FocusHeader(model, block, slot.info, page + 1, draft.blocks.size, oneHand)
+                    val last = draft.blocks.lastIndex
+                    val isNext = next == page
+                    val reorder = remember(page, last, isNext) {
+                        Reorder(
+                            collapsed = false, lifted = false, canUp = page > 0, canDown = page < last, move = { model.moveExercise(page, it) },
+                            start = {}, drag = {}, end = {}, held = false, offset = { 0f }, next = isNext, superset = { model.toggleSuperset(page) },
+                        )
+                    }
+                    BlockCard(model, workouts, block, reorder, keys[page], pad, Modifier, onSwitch = { model.switchVariation(page, it) }, onUndo = onUndo, slot = slot) { changed -> onChange(page, block, changed) }
+                }
+                Column(Modifier.fillMaxWidth().padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    QuietButton("Add exercise", onAdd, Modifier.fillMaxWidth())
+                    if (block == null && onCancel != null) DangerButton("Cancel workout", onCancel, Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(120.dp))
+                }
+            }
+        }
+    }
+}
+
+/** The top of a focus page: the exercise, which set is next, its weight × reps in large type, last time, and Done. */
+@Composable
+private fun FocusHeader(model: AppModel, block: DraftBlock, info: FocusInfo?, position: Int, count: Int, oneHand: Boolean) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = Space.l, vertical = Space.s), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
+        Caption("Exercise $position of $count")
+        Text(
+            block.exercise,
+            Modifier.clickable { model.open(Screen.ExerciseDetail(block.exercise, tab = model.workoutExerciseTab.value)) }.minTouch().wrapContentHeight(Alignment.CenterVertically).semantics { heading() },
+            style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center,
+        )
+        if (info == null) {
+            Text(if (block.items.any { it is DraftSet }) "All sets done" else "No sets yet", Modifier.padding(vertical = Space.m), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            return@Column
+        }
+        Text("Set ${info.number} of ${info.total}${info.side?.let { " · $it" }.orEmpty()}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        @Composable
+        fun Value(text: String, typed: Boolean, unit: String, reps: Boolean, spoken: String) {
+            Row(Modifier.clickable(onClickLabel = "Edit") { info.onEdit(reps) }.minTouch().semantics(mergeDescendants = true) { contentDescription = spoken }, verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text.ifEmpty { NONE }, style = MaterialTheme.typography.displaySmall.numbers(), fontWeight = FontWeight.Bold, maxLines = 1,
+                    color = if (typed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+                if (unit.isNotEmpty()) Text(" $unit", Modifier.padding(bottom = Space.s), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+            Value(if (info.weight.isEmpty()) "" else info.weightSign + info.weight, info.weightTyped, info.weightUnit, false, "Weight, ${if (info.weight.isEmpty()) "empty" else "${info.weightSign}${info.weight}"} ${info.weightUnit}")
+            Text("  ×  ", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Value(info.reps, info.repsTyped, info.repsUnit, true, "${if (info.repsUnit.isEmpty()) "Reps" else "Time"}, ${info.reps.ifEmpty { "empty" }} ${info.repsUnit.ifEmpty { "reps" }}")
+        }
+        info.last?.let { Text("Last time $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        // The same tick as the row's own box; a taller button when one-handed.
+        MainButton(
+            "Done", info.onDone,
+            Modifier.fillMaxWidth().padding(top = Space.s).then(if (oneHand) Modifier.height(72.dp) else Modifier.heightIn(min = 56.dp)).semantics { contentDescription = "Done, ${info.spoken}" },
+        )
+    }
+}
+
+/** What a card needs to be moved among the others: from its menu, or by holding its name and dragging. */
+private class Reorder(
+    val collapsed: Boolean, val lifted: Boolean, val canUp: Boolean, val canDown: Boolean,
+    /** [start] is given how far under the card's top the finger took hold, when the card knows. */
+    val move: (Int) -> Unit, val start: (Float?) -> Unit, val drag: (Float) -> Unit, val end: () -> Unit,
+    /** The card is the one picked up, or still settling after it was let go, and how far it is drawn from its slot. */
+    val held: Boolean, val offset: () -> Float,
+    /** Whether this card holds the set to do next, and how to link it with the card below as a superset. */
+    val next: Boolean, val superset: () -> Unit,
+)
+
+/** What a set is read against: its variation's unit, way of logging, sessions and PRs. */
+private class SetContext(
+    val unit: String, val loadType: LoadType, val sessions: List<clean.core.Session>, val sided: SideRecords, val bests: SidedBests,
+    /** What its progression scheme (if it has one) aims for in each working set, from the last session; the left half's in a left and right card. */
+    val targets: List<Target> = emptyList(),
+    /** The right half's targets in a left and right card, from the last session's right sets. */
+    val rightTargets: List<Target> = emptyList(),
+) {
+    /** The comparable figure: for each record the weaker side's (the only figure of an ordinary exercise). */
+    val records: ExerciseRecords get() = sided.comparable
+
+    /** One step of weight for this exercise: the smallest jump ever logged, or 5 for pounds. Worked out once, when first asked for. */
+    val step: Double by lazy { if (unit == "lb") 5.0 else weightStep(sessions) }
+}
+
+/** A variation's name without the overall exercise in front: `Pull Up (Wide Grip)` is `Wide Grip`. */
+fun shortVariation(name: String, overall: String): String {
+    val rest = name.removePrefix(overall).trim().removePrefix("-").trim()
+    return when {
+        rest.isEmpty() -> "Standard"
+        rest.startsWith("(") && rest.endsWith(")") && rest.count { it == '(' } == 1 -> rest.substring(1, rest.length - 1)
+        else -> rest
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBlock, reorder: Reorder, id: String, pad: Pad, modifier: Modifier, onSwitch: (String) -> Unit, onUndo: (String, () -> Unit) -> Unit, slot: FocusSlot? = null, onChange: (DraftBlock?) -> Unit) {
+    // The workout this card belongs to: the one in progress, or a finished one on the Correct page.
+    val owner = LocalDraftSlot.current ?: model.liveSlot
+    val correcting = owner.correcting
+    // Keyed on the settings so the card redraws when the exercise's unit, load type or sticky note is saved.
+    val settings by model.settings.collectAsState()
+    val unit = remember(settings, block.exercise) { model.unitOf(block.exercise) }
+    val loadType = remember(settings, block.exercise) { model.loadTypeOf(block.exercise) }
+    val sticky = settings[block.exercise]?.note.orEmpty()
+    val stickyColor by model.stickyColor.collectAsState()
+    val auto by model.auto.collectAsState()
+    val sessions = remember(workouts, block.exercise) { model.sessionsIn(workouts, block.exercise) }
+    val previous = carriedSets(sessions.lastOrNull(), block.paired, Side.LEFT)
+    val bodyweights by model.bodyweights.collectAsState()
+    val rule by model.oneRm.collectAsState()
+    val schemes by model.progressions.collectAsState()
+    // Done left and right: the sets are drawn as pairs, one row each, though they are stored as ordinary sets (the card's own marker).
+    val paired = block.paired
+    val sided = remember(sessions, loadType, bodyweights, rule) { recordsBySide(sessions, rule, loadType, bodyweights::at) }
+    val records = sided.comparable
+    // Today's bodyweight, if there is a weigh-in close enough; a bodyweight or assisted lift needs it.
+    val bodyweight = remember(bodyweights) { bodyweights.at(strongDate(System.currentTimeMillis())) }
+    var menu by remember { mutableStateOf(false) }
+    var editingSticky by remember { mutableStateOf(false) }
+    var replacing by remember { mutableStateOf(false) }
+    var switching by remember { mutableStateOf(false) }
+    var explaining by remember { mutableStateOf(false) }
+    var progressing by remember { mutableStateOf(false) }
+    val variations = remember(settings, block.exercise) { model.variationsOf(block.exercise) }
+    val overall = remember(settings, block.exercise) { model.overallOf(block.exercise) }
+    // Every variation in this card, the card's own first, each with what its sets are read against.
+    val names = remember(block) { (listOf(block.exercise) + block.items.filterIsInstance<DraftSet>().mapNotNull { it.exercise }).distinct() }
+    val contexts = remember(settings, workouts, bodyweights, names, rule, schemes, paired) {
+        names.associateWith { n ->
+            val type = model.loadTypeOf(n)
+            val done = model.sessionsIn(workouts, n)
+            val last = done.lastOrNull()
+            // Left and right: each side aims from its own last sets, and the weight goes up when both reached the top.
+            val (left, right) = schemes[n]?.let { scheme ->
+                if (paired) nextForSides(last?.forSide(Side.LEFT)?.sets.orEmpty(), last?.forSide(Side.RIGHT)?.sets.orEmpty(), scheme, type)
+                else nextFor(carriedSets(last, false, Side.LEFT), scheme, type) to emptyList()
+            } ?: (emptyList<Target>() to emptyList())
+            SetContext(model.unitOf(n), type, done, recordsBySide(done, rule, type, bodyweights::at), prBestsBySide(done, type, bodyweights::at, rule), left, right)
+        }
+    }
+    // The variations done before or in use in this card, worked out once for the chips and every set's menu.
+    val quick = remember(variations, names, workouts) { variations.filter { model.hasHistory(it) || it in names } }
+    val reorderNow by rememberUpdatedState(reorder)
+    val finished = block.items.any { it is DraftSet } && block.items.all { it !is DraftSet || it.done }
+    var unfolded by remember(finished) { mutableStateOf(false) }
+    val compact = model.flag("workout.compact")
+    val dense = LocalDense.current
+    val focusManager = LocalFocusManager.current
+    // The set to do next, when it is in this card.
+    val nextItem = if (reorder.next) block.items.indexOfFirst { it is DraftSet && !it.done } else -1
+    var resting by remember { mutableStateOf(false) }
+    var warming by remember { mutableStateOf(false) }
+    var platesFor by remember { mutableStateOf<Pair<String, String>?>(null) }
+    /** The set the stopwatch sheet is open for, and the seconds it took last time. */
+    var timing by remember { mutableStateOf<Pair<Int, Int?>?>(null) }
+
+    /**
+     * Lays out the preferred working and drop sets in place of the sets not ticked yet, filled with
+     * the weight and reps to aim for: one that beats the best estimated 1RM, from the best set of
+     * the last session. Warm-ups come first, starting at half the working weight and stepping up
+     * evenly; a drop set is a fifth lighter. With no history the sets are left empty.
+     */
+    fun autoFill() {
+        val last = sessions.lastOrNull()
+        val ctx = contexts.getValue(block.exercise)
+        val step = weightStep(sessions)
+        /** What one side's sets are laid out with: the weight and reps to aim for, a drop's weight, the warm-up weights, and the scheme's targets. */
+        class Plan(val weight: String, val reps: String, val dropWeight: String, val warm: List<String>, val progressed: List<Target>)
+        fun plan(series: List<clean.core.SetItem>, e1rm: Double?, progressed: List<Target>): Plan {
+            val best = series
+                .filter { it.type != SetType.WARMUP && it.type != SetType.DROP && it.weight != null && (it.reps ?: 0) >= 1 }
+                .maxByOrNull { it.weight!! * (1 + it.reps!! / 30.0) }
+            if (best == null || loadType == LoadType.TIMED || loadType == LoadType.CARDIO) return Plan("", "", "", List(auto.third) { "" }, progressed)
+            val from = Target(best.weight!!, best.reps!!)
+            // Only a plain loaded lift goes up in weight by rule; where bodyweight is part of the load it is one more rep.
+            val target = progressed.firstOrNull() ?: if (loadType == LoadType.NORMAL) nextTarget(from, e1rm, step, rule) else Target(from.weight, from.reps + 1)
+            return Plan(
+                entryWeight(target.weight, unit), target.reps.toString(),
+                entryWeight(if (loadType == LoadType.NORMAL) Math.round(target.weight * 0.8 / step) * step else target.weight, unit),
+                // One warm-up is half the working weight; more of them step up evenly from there.
+                List(auto.third) { i -> entryWeight(if (loadType == LoadType.NORMAL) Math.round(target.weight * (0.5 + 0.5 * i / auto.third) / step) * step else target.weight, unit) },
+                progressed,
+            )
+        }
+        // With a progression scheme its targets set the working sets, set by set (the last one repeats if the layout has more sets).
+        // Left and right: each side is laid out from its own last sets and its own targets.
+        val left = if (paired) plan(last?.forSide(Side.LEFT)?.sets.orEmpty(), sided.left.estimated1Rm?.value, ctx.targets)
+        else plan(carriedSets(last, false, Side.LEFT), records.estimated1Rm?.value, ctx.targets)
+        val right = if (paired) plan(last?.forSide(Side.RIGHT)?.sets.orEmpty(), sided.right.estimated1Rm?.value, ctx.rightTargets) else left
+        model.message = if (left.weight.isEmpty() && right.weight.isEmpty()) "Nothing to go on yet, so the sets are empty"
+        else if (!paired || (left.weight == right.weight && left.reps == right.reps)) "Aiming for ${left.weight} $unit × ${left.reps}"
+        else "Aiming for ${left.weight} $unit × ${left.reps} left, ${right.weight} $unit × ${right.reps} right"
+        // Left and right: a pair with either side ticked stays whole, and each layout set is laid out as a pair.
+        val holding = if (paired) sidePairs(block.items.map { it is DraftSet }).filter { (l, r) -> listOfNotNull(l, r).any { (block.items[it] as DraftSet).done } }.flatMap { listOfNotNull(it.first, it.second) }.toSet() else emptySet()
+        val kept = block.items.filterIndexed { i, it -> it !is DraftSet || it.done || i in holding }
+        fun round(l: DraftSet, r: DraftSet) = if (paired) listOf(l, r) else listOf(l)
+        fun working(p: Plan, i: Int) = p.progressed.getOrNull(minOf(i, p.progressed.lastIndex))?.let { DraftSet(SetType.NORMAL, entryWeight(it.weight, unit), it.reps.toString()) } ?: DraftSet(SetType.NORMAL, p.weight, p.reps)
+        // Sets already filled in by hand are replaced; they can be put back for a few seconds.
+        val before = owner.draft.takeIf { block.items.any { it is DraftSet && !it.done && (it.weight.isNotEmpty() || it.reps.isNotEmpty()) } }
+        onChange(block.copy(items = kept +
+            List(auto.third) { i -> round(DraftSet(SetType.WARMUP, left.warm[i], left.reps), DraftSet(SetType.WARMUP, right.warm[i], right.reps)) }.flatten() +
+            List(auto.first) { i -> round(working(left, i), working(right, i)) }.flatten() +
+            List(auto.second) { round(DraftSet(SetType.DROP, left.dropWeight, left.reps), DraftSet(SetType.DROP, right.dropWeight, right.reps)) }.flatten()))
+        if (before != null) onUndo("Sets replaced") { owner.put(before) }
+    }
+
+    fun replace(index: Int, item: DraftItem?) {
+        val items = block.items.toMutableList()
+        if (item == null) items.removeAt(index) else items[index] = item
+        onChange(block.copy(items = items))
+    }
+
+    val linked = MaterialTheme.colorScheme.tertiary
+    // 1 while picked up, 0 otherwise: the card grows a little and throws a shadow.
+    val lift by animateFloatAsState(if (reorder.lifted) 1f else 0f, if (LocalMotion.current) Motion.short() else snap(), label = "lift")
+    val liftShadow = with(LocalDensity.current) { 8.dp.toPx() }
+    val card = cardShape()
+    // Where the card and its name are laid out, to know how far under the card's top a finger took hold of the name.
+    // Plain holders, not state: nothing is redrawn when the card scrolls.
+    val placed = remember { arrayOfNulls<LayoutCoordinates>(2) }
+    val nameSource = remember { MutableInteractionSource() }
+    Column(
+        modifier.fillMaxWidth()
+            // The held card is drawn at the finger, over its neighbours.
+            .zIndex(if (reorder.held) 1f else 0f)
+            .graphicsLayer { translationY = if (reorder.held) reorder.offset() else 0f }
+            .onGloballyPositioned { placed[0] = it }
+            .padding(top = Space.s, bottom = Space.s)
+            // The exercises of a superset are joined by a line down their left edge.
+            .drawBehind { if (block.superset != null) drawRect(linked, Offset(4.dp.toPx(), 0f), Size(3.dp.toPx(), size.height)) },
+    ) {
+        if (block.superset != null) Caption("Superset", Modifier.padding(start = Space.l))
+        // A swipe on the name removes the exercise (with Undo) in the direction the set swipes use for removing; not in focus mode,
+        // where a sideways swipe turns the page. It stays in place while the cards are folded to reorder: the hold owns the finger
+        // then, and taking the swipe's detector away mid-hold would end the hold.
+        val feel = LocalFeel.current
+        val removeSwipe = SwipeAction("Remove", CleanIcons.Delete, LocalCleanColors.current.danger, true) { if (!reorderNow.collapsed) onChange(null) }
+        val swipeLeft = removeSwipe.takeIf { removesExercise(feel.swipeLeft) && slot == null }
+        val swipeRight = removeSwipe.takeIf { removesExercise(feel.swipeRight) && slot == null }
+        OptionalSwipe(swipeLeft, swipeRight) {
+        Row(
+            Modifier.then(if (reorder.collapsed) Modifier.height(52.dp).padding(horizontal = Space.s) else Modifier)
+                .graphicsLayer { scaleX = 1f + 0.03f * lift; scaleY = scaleX; shadowElevation = liftShadow * lift; shape = card }
+                .then(if (reorder.collapsed) Modifier.background(if (reorder.lifted) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, card) else Modifier)
+                .padding(start = Space.l, end = Space.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                block.exercise,
+                Modifier.weight(1f).onGloballyPositioned { placed[1] = it }.pointerInput(Unit) {
+                    detectDragGesturesAfterLongPress(onDragStart = { touch ->
+                        val card = placed[0]?.takeIf { it.isAttached }
+                        val name = placed[1]?.takeIf { it.isAttached }
+                        reorderNow.start(if (card != null && name != null) card.localPositionOf(name, touch).y else null)
+                    }, onDragEnd = { reorderNow.end() }, onDragCancel = { reorderNow.end() }) { change, amount ->
+                        change.consume()
+                        reorderNow.drag(amount.y)
+                    }
+                // No ripple while the cards are folded for reordering: the press that picked the card up would stay drawn behind the name.
+                }.clickable(nameSource, if (reorder.collapsed) null else LocalIndication.current) { model.open(Screen.ExerciseDetail(block.exercise, tab = model.workoutExerciseTab.value)) },
+                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            IconButton(onClick = { menu = true }) { Icon(CleanIcons.More, "Exercise options", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        }
+        if (menu) Sheet({ menu = false }, block.exercise) {
+            // A note goes above the sets it is about; a card already opening with one gets no second.
+            SheetRow("Add note", CleanIcons.Notes) {
+                menu = false
+                if (block.items.firstOrNull() !is DraftNote) onChange(block.copy(items = listOf(DraftNote()) + block.items))
+            }
+            // Tapping the note itself edits it, so the menu only needs to add one or take it away.
+            if (sticky.isEmpty()) SheetRow("Add sticky note", CleanIcons.Pin) { menu = false; editingSticky = true }
+            else SheetRow("Remove sticky note", CleanIcons.Pin) {
+                menu = false
+                val old = sticky
+                model.putSetting(block.exercise) { it.copy(note = "") }
+                onUndo("Sticky note removed") { model.putSetting(block.exercise) { it.copy(note = old) } }
+            }
+            SheetRow("Auto-fill sets", CleanIcons.Bolt) { menu = false; autoFill() }
+            SheetRow("Warm-up sets", CleanIcons.Up) { menu = false; warming = true }
+            SheetRow("Progression", CleanIcons.Up, value = schemes[block.exercise]?.let { "${it.minReps}–${it.maxReps} reps" } ?: "Off") { menu = false; progressing = true }
+            SheetRow("Left and right", CleanIcons.LeftRight, value = if (paired) "On" else "Off") {
+                menu = false
+                val before = owner.draft
+                val was = paired
+                model.setSides(block.exercise, !was)
+                onUndo(if (was) "Left and right off" else "Left and right on") { model.setSides(block.exercise, was); owner.put(before) }
+            }
+            // Correcting a finished workout has no rest to time.
+            if (!correcting) SheetRow("Rest timer", CleanIcons.Timer, value = restLabel(model.restFor(block.exercise))) { menu = false; resting = true }
+            SheetGap()
+            SheetRow("Switch variation", CleanIcons.Swap) { menu = false; switching = true }
+            SheetRow("Replace exercise", CleanIcons.Refresh) { menu = false; replacing = true }
+            SheetRow("Move up", CleanIcons.Up, enabled = reorder.canUp) { menu = false; reorder.move(-1) }
+            SheetRow("Move down", CleanIcons.Down, enabled = reorder.canDown) { menu = false; reorder.move(1) }
+            SheetRow(if (block.superset == null) "Superset with the next exercise" else "Take out of the superset", CleanIcons.Link, enabled = block.superset != null || reorder.canDown) { menu = false; reorder.superset() }
+            SheetGap()
+            SheetRow("Remove exercise", CleanIcons.Delete, danger = true) { menu = false; onChange(null) }
+        }
+        // While an exercise is being dragged only the names show; the rest folds away and unfolds again.
+        val fold = LocalMotion.current
+        AnimatedVisibility(
+            !reorder.collapsed,
+            enter = Motion.appear(fold),
+            exit = Motion.vanish(fold),
+        ) {
+        Column {
+            // An exercise with every set ticked takes little room: its sets in a line or two, opening up again when touched.
+            if (compact && finished && !unfolded) {
+                // One short line per set, its number or letter in the set type's colour as in the full rows.
+                Column(Modifier.fillMaxWidth().clickable { unfolded = true }.padding(horizontal = Space.l, vertical = Space.xxs)) {
+                    var n = 0
+                    for (set in block.items.filterIsInstance<DraftSet>()) {
+                        if (set.type.numbered) n++
+                        val c = contexts[set.exercise ?: block.exercise] ?: contexts.getValue(block.exercise)
+                        Row {
+                            Text(if (set.type == SetType.NORMAL) n.toString() else set.type.letter, Modifier.width(36.dp), style = MaterialTheme.typography.bodySmall, color = typeColor(set.type), fontWeight = FontWeight.Bold)
+                            Text(
+                                when (c.loadType) {
+                                    LoadType.CARDIO -> "${set.weight} km, ${set.reps} min"
+                                    LoadType.TIMED -> "${set.weight.ifEmpty { "0" }} ${c.unit}, ${set.reps} s"
+                                    else -> "${set.weight.ifEmpty { "0" }} ${c.unit} × ${set.reps}"
+                                },
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                if (slot != null) SideEffect { slot.info = null }
+                return@Column
+            }
+            // A goal not reached yet, quietly under the name; it leads to the goal on the exercise's page.
+            val goal = remember(settings, block.exercise) { parseGoal(settings[block.exercise]?.goal) }
+            val goalMet = remember(sessions, goal, loadType, bodyweights, rule) { goal?.let { (kg, reps) -> goalReachedOn(sessions, kg, reps, rule, loadType, bodyweights::at) } }
+            if (goal != null && goalMet == null) {
+                val goalShare = remember(sessions, goal, loadType, bodyweights, rule) { exerciseGoalProgress(sessions, goal.first, goal.second, rule, loadType, bodyweights::at, java.time.LocalDate.now())?.fraction }
+                val sign = when (loadType) { LoadType.BODYWEIGHT -> "+"; LoadType.ASSISTED -> "−"; else -> "" }
+                Text(
+                    "Goal $sign${showWeight(goal.first, unit)} × ${goal.second}" + (goalShare?.let { " · ${Math.round(it * 100)} %" } ?: ""),
+                    Modifier.clickable { model.open(Screen.ExerciseDetail(block.exercise, tab = 0)) }.padding(horizontal = Space.l, vertical = Space.xxs),
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            // With no progression scheme of its own, one quiet line of what to try: last time's best set and the set that
+            // beats the best estimated 1RM (reps first, then weight, as auto-fill aims). It leads to setting a scheme.
+            if (!correcting && model.flag("workout.hint") && !paired && schemes[block.exercise] == null && (loadType == LoadType.NORMAL || loadType == LoadType.BODYWEIGHT)) {
+                val hint = remember(sessions, records, loadType) {
+                    val best = carriedSets(sessions.lastOrNull(), false, Side.LEFT)
+                        .filter { it.type != SetType.WARMUP && it.type != SetType.DROP && it.weight != null && (it.reps ?: 0) >= 1 }
+                        .maxByOrNull { it.weight!! * (1 + it.reps!! / 30.0) } ?: return@remember null
+                    val from = Target(best.weight!!, best.reps!!)
+                    from to if (loadType == LoadType.NORMAL) nextTarget(from, records.estimated1Rm?.value, weightStep(sessions), rule) else Target(from.weight, from.reps + 1)
+                }
+                if (hint != null) {
+                    fun text(t: Target) = "${if (loadType == LoadType.BODYWEIGHT) "+" else ""}${entryWeight(t.weight, unit)} $unit × ${t.reps}"
+                    Text(
+                        "Last time ${text(hint.first)}. Try ${text(hint.second)}",
+                        Modifier.clickable { progressing = true }.padding(horizontal = Space.l, vertical = Space.xxs),
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            // The variations done before, a tap away: the sets not ticked yet carry on as the one tapped.
+            val current = block.items.filterIsInstance<DraftSet>().let { sets -> (sets.firstOrNull { !it.done } ?: sets.lastOrNull())?.exercise } ?: block.exercise
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = Space.m), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                if (quick.size > 1) for (v in quick) CleanChip(selected = v == current, onClick = { if (v != current) onSwitch(v) }, label = { Text(shortVariation(v, overall)) })
+                // The way to another variation, or to a new one, without going through the menu.
+                AssistChip(onClick = { switching = true }, label = { Text(if (quick.size > 1) "+" else "+ Variation") })
+            }
+            if (sticky.isNotEmpty()) {
+                // A name from the list, or a colour of the user's own; the text turns dark on a light band.
+                val band = stickyBand(stickyColor, LocalLook.current.dark).inLook()
+                Text(
+                    sticky, fontWeight = FontWeight.Bold, color = band.readableOn(),
+                    modifier = Modifier.padding(horizontal = Space.m, vertical = Space.xs).fillMaxWidth().clip(cardShape()).background(band).clickable { editingSticky = true }.padding(horizontal = Space.l, vertical = Space.s),
+                )
+            }
+            val cardio = loadType == LoadType.CARDIO
+            val timed = loadType == LoadType.TIMED
+            if ((loadType == LoadType.BODYWEIGHT || loadType == LoadType.ASSISTED) && bodyweight == null) {
+                Column(Modifier.padding(horizontal = Space.l)) {
+                    Text(
+                        "No weigh-in in the last $BODYWEIGHT_WINDOW_DAYS days. Without one these sets get no volume, estimated 1RM or PRs beyond the weight itself.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary,
+                    )
+                    QuietButton("Log weight now", { model.logWeight() })
+                }
+            }
+            Row(Modifier.padding(start = Space.s, end = Space.m, top = Space.s, bottom = Space.xs), verticalAlignment = Alignment.CenterVertically) {
+                Caption("Set", Modifier.width(44.dp).clickable { explaining = true }, TextAlign.Center)
+                if (paired) {
+                    // Two halves with the boxes' units under their names; the previous values sit under each half's boxes.
+                    Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(SIDES_GAP)) {
+                        for (side in listOf("Left", "Right")) Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Caption(side)
+                            Text(
+                                if (cardio) "km × min" else if (timed) "$unit × sec" else "$unit × reps", maxLines = 1,
+                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                } else {
+                    if (!dense) Caption("Previous", Modifier.weight(1f), TextAlign.Center)
+                    Caption(if (cardio) "km" else unit, if (dense) Modifier.weight(1f) else Modifier.width(84.dp), TextAlign.Center)
+                    Caption(if (cardio) "min" else if (timed) "sec" else "reps", if (dense) Modifier.weight(1f) else Modifier.width(84.dp), TextAlign.Center)
+                    Box(Modifier.width(44.dp), contentAlignment = Alignment.Center) { Icon(CleanIcons.Check, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
+            }
+
+            // How many sets of each variation have come so far, to line each up with its own last session.
+            val seen = HashMap<String, Int>()
+            // And of working sets, to line each up with its own target.
+            val worked = HashMap<String, Int>()
+            // Each set's view as it was drawn, so a tick can read the hints of an earlier set (the half it completes).
+            val views = HashMap<Int, SetView>()
+            var shownName = block.exercise
+            var position = 0
+            var lastSet: DraftSet? = null
+            // Left and right: each left set with its right, and the rights, which are drawn with the left before them.
+            val rightOf = if (paired) sidePairs(block.items.map { it is DraftSet }).mapNotNull { (l, r) -> r?.let { l to it } }.toMap() else emptyMap()
+            val rights = rightOf.values.toSet()
+            val leftOf = rightOf.entries.associate { (l, r) -> r to l }
+            val live = liveRecords(block, contexts, bodyweight, rule)
+            // A set ticked now that earns a new estimated 1RM gets a chime and two taps, once (once per round when either half does);
+            // those that had already earned one when the card appeared are not celebrated again.
+            val celebrated = remember { live.filterValues { PrKind.ONE_RM in it }.keys.map { leftOf[it] ?: it }.toMutableSet() }
+            val moment = model.flag("pr.moment")
+            val motion = LocalMotion.current
+            LaunchedEffect(live) {
+                val fresh = live.filterValues { PrKind.ONE_RM in it }.keys.map { leftOf[it] ?: it }.toSet().filter { celebrated.add(it) }
+                if (fresh.isNotEmpty() && moment && motion) {
+                    Feedback.doubleTick()
+                    Feedback.chime()
+                }
+            }
+            var setNumber = 0
+            // Focus mode: the first set not ticked (a half of a pair, or a set), for the page above the card.
+            var focusInfo: FocusInfo? = null
+            val rowsTotal = block.items.count { it is DraftSet } - rights.size
+            fun focusOf(v: SetView, side: String?, set: DraftSet, last: String?, onEdit: (Boolean) -> Unit, onDone: () -> Unit) = FocusInfo(
+                setNumber, rowsTotal, side, set.weight.ifEmpty { v.hintWeight }, set.reps.ifEmpty { v.hintReps }, set.weight.isNotEmpty(), set.reps.isNotEmpty(),
+                if (v.c.loadType == LoadType.CARDIO) "km" else v.c.unit, when (v.c.loadType) { LoadType.CARDIO -> "min"; LoadType.TIMED -> "s"; else -> "" },
+                last, v.spoken + (side?.let { " " + it.lowercase() } ?: ""), onEdit, onDone,
+                when (v.c.loadType) { LoadType.BODYWEIGHT -> "+"; LoadType.ASSISTED -> "−"; else -> "" },
+            )
+            /**
+             * What the set at [index] is read against and shows, counting it in the numbering unless it is the [partner]
+             * a pair's left set was counted with, whose target it shares.
+             */
+            fun viewOf(index: Int, item: DraftSet, partner: SetView? = null, other: DraftSet? = null): SetView {
+                if (partner == null) {
+                    setNumber++
+                    // A round is numbered unless every half it has is a warm-up; a round whose halves differ shows its number, each half its own letter.
+                    if (roundCounts(item.type, other?.type)) position++
+                }
+                // Each set is read against its own variation: its unit, how it is logged, its last session and its PRs.
+                val name = item.exercise ?: block.exercise
+                val c = contexts[name] ?: contexts.getValue(block.exercise)
+                // Left and right: round k reads against last time's own side of round k (a session of ordinary sets gives both halves its set k);
+                // an ordinary card reads a left and right session as one set per round, the heavier side's (carriedSets).
+                val lastSession = c.sessions.lastOrNull()
+                val series = carriedSets(lastSession, paired, if (partner == null) Side.LEFT else Side.RIGHT)
+                val before = series.getOrNull(if (partner == null) seen.getOrDefault(name, 0) else seen.getOrDefault(name, 1) - 1)
+                if (partner == null) seen[name] = seen.getOrDefault(name, 0) + 1
+                val shown = name != shownName
+                shownName = name
+                // What an empty box will take when the set is ticked: last time's value, else the set above.
+                // For cardio the boxes are kilometres and minutes; for a timed hold, weight and seconds.
+                val cardio = c.loadType == LoadType.CARDIO
+                val timed = c.loadType == LoadType.TIMED
+                val lastWeight = if (cardio) before?.distance?.let { shortNumber(it / 1000) } else before?.weight?.let { entryWeight(it, c.unit) }
+                val lastReps = if (cardio) before?.seconds?.let { shortNumber(it / 60) } else if (timed) before?.seconds?.let { shortNumber(it) } else before?.reps?.toString()
+                // With a progression scheme, a working set's boxes show what to aim for, set by set, in place of last time.
+                // Left and right: each half aims for its own side's target of last time.
+                val aim = if (item.type != SetType.NORMAL && item.type != SetType.FAILURE) null
+                else if (partner != null) c.rightTargets.getOrNull(worked.getOrDefault(name, 1) - 1)
+                else c.targets.getOrNull(worked.getOrDefault(name, 0)).also { worked[name] = worked.getOrDefault(name, 0) + 1 }
+                // Without a scheme, a workout started from a template shows the template's value for this set in place of last time's. Left and right: one value per pair, on both halves.
+                val planned = if (c.loadType != LoadType.CARDIO && schemes[name] == null) block.targets.getOrNull(block.items.take(index).count { it is DraftSet } / if (paired) 2 else 1) else null
+                val hintWeight = aim?.let { entryWeight(it.weight, c.unit) } ?: planned?.weightKg?.let { entryWeight(it, c.unit) } ?: lastWeight ?: lastSet?.weight.orEmpty()
+                val hintReps = aim?.reps?.toString() ?: planned?.reps?.toString() ?: lastReps ?: lastSet?.reps.orEmpty()
+                // The box of this set the number pad is on, if any; the pad is told its step and what the empty box stands for.
+                val target = pad.target?.takeIf { it.card == id && it.item == index }
+                // The same box of the set above, for the pad's "Same" key.
+                // In a left and right card, a side with no value in that box (or no such side) hands over to the other side of the round above.
+                val aboveSets = target?.let { setsAbove(block.items.map { x -> x is DraftSet }, index, paired) }.orEmpty().mapNotNull { block.items[it] as? DraftSet }
+                val meta = target?.let {
+                    if (it.reps) PadMeta(1.0, hintReps, cardio || timed, aboveSets.map { s -> s.reps }.firstOrNull { v -> v.isNotEmpty() }.orEmpty())
+                    else PadMeta(if (cardio) 0.5 else c.step, hintWeight, true, aboveSets.map { s -> s.weight }.firstOrNull { v -> v.isNotEmpty() }.orEmpty())
+                }
+                lastSet = item
+                return SetView(
+                    index, item, name, c, (roundKind(item.type, other?.type) ?: SetType.NORMAL).let { if (it == SetType.NORMAL) position.toString() else it.letter }, "Set $setNumber",
+                    before, aim, lastWeight, lastReps, hintWeight, hintReps, if (target == null) 0 else if (target.reps) 2 else 1, meta, shown,
+                ).also { views[index] = it }
+            }
+            block.items.forEachIndexed { index, item ->
+                when (item) {
+                    is DraftNote -> {
+                        position = 0
+                        TextField(
+                            value = item.text,
+                            onValueChange = { replace(index, DraftNote(it)) },
+                            placeholder = { Text("Write a note") },
+                            shape = SmallShape,
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant, unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+                            ),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = Space.m, vertical = Space.xs),
+                            trailingIcon = { IconButton(onClick = { replace(index, null) }) { Icon(CleanIcons.Close, "Remove note") } },
+                        )
+                    }
+                    is DraftSet -> {
+                        // The right half of a pair is drawn with the left before it.
+                        if (index in rights) return@forEachIndexed
+                        val v = viewOf(index, item, other = rightOf[index]?.let { block.items[it] as DraftSet })
+                        val name = v.name
+                        val c = v.c
+                        val unit = c.unit
+                        val loadType = c.loadType
+                        val records = c.records
+                        val cardio = loadType == LoadType.CARDIO
+                        val timed = loadType == LoadType.TIMED
+                        val before = v.before
+                        val aim = v.aim
+                        val lastWeight = v.lastWeight
+                        val lastReps = v.lastReps
+                        val hintWeight = v.hintWeight
+                        val hintReps = v.hintReps
+                        if (v.newVariation) {
+                            Text(shortVariation(name, overall), Modifier.padding(start = Space.xl, top = Space.s), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        }
+                        v.padMeta?.let { meta -> SideEffect { if (pad.meta != meta) pad.meta = meta } }
+                        val tag = before?.type?.takeIf { it != SetType.NORMAL && it != item.type }
+                        val tagColor = tag?.let { typeColor(it) } ?: Color.Unspecified
+                        val rightAt = rightOf[index]
+                        if (paired) {
+                            val right = rightAt?.let { viewOf(it, block.items[it] as DraftSet, partner = v) }
+                            right?.padMeta?.let { meta -> SideEffect { if (pad.meta != meta) pad.meta = meta } }
+                            fun onBoth(change: (DraftSet) -> DraftSet) {
+                                onChange(block.copy(items = block.items.mapIndexed { i, other -> if (i == index || i == rightAt) change(other as DraftSet) else other }))
+                            }
+                            // One half: its boxes and tick, and last time's matching set as a quiet line under them.
+                            fun half(side: String, w: SetView, mixed: Boolean) = Half(
+                                set = w.item, side = side, spoken = "${w.spoken} ${side.lowercase()}", mixed = mixed,
+                                previous = w.before?.let { setValues(it, unit) }, hintWeight = w.hintWeight, hintReps = w.hintReps,
+                                highlight = w.index == nextItem, focus = w.focus,
+                                onFocus = { reps -> focusManager.clearFocus(); pad.focus(id, w.index, reps) },
+                                onPrevious = if (w.before == null) null else ({ replace(w.index, w.item.copy(weight = w.lastWeight.orEmpty(), reps = w.lastReps.orEmpty())) }),
+                                onTick = {
+                                    val s = w.item
+                                    if (s.done) replace(w.index, s.copy(done = false, rest = 0, ticked = 0))
+                                    else {
+                                        val taken = acceptHints(s.weight, s.reps, w.hintWeight, w.hintReps, loadType)
+                                        if (taken == null) model.message = if (cardio) "Enter the minutes first" else if (timed) "Enter the seconds first" else "Enter the reps first"
+                                        else {
+                                            val now = System.currentTimeMillis()
+                                            val items = block.items.toMutableList()
+                                            items[w.index] = s.copy(weight = taken.weight, reps = taken.reps, done = true, ticked = now)
+                                            // Moving on: a round before this one with only one half ticked gets the other half ticked, as ticking it would.
+                                            val rounds = sidePairs(block.items.map { it is DraftSet })
+                                            val halves = rounds.getOrNull(rounds.indexOfFirst { it.first == w.index || it.second == w.index } - 1)?.let { listOfNotNull(it.first, it.second) }.orEmpty()
+                                            val missing = halves.singleOrNull { !(block.items[it] as DraftSet).done }
+                                            val gap = missing?.let { views[it] }
+                                            val old = missing?.let { block.items[it] as DraftSet }
+                                            val missed = if (old != null && gap != null) acceptHints(old.weight, old.reps, gap.hintWeight, gap.hintReps, gap.c.loadType) else null
+                                            var auto: DraftSet? = null
+                                            if (missing != null && halves.size == 2 && gap != null && old != null && missed != null) {
+                                                val doneOne = block.items[halves.first { it != missing }] as DraftSet
+                                                auto = old.copy(weight = missed.weight, reps = missed.reps, done = true, ticked = maxOf(now, doneOne.ticked + 1))
+                                                items[missing] = auto
+                                            }
+                                            onChange(block.copy(items = items))
+                                            if (auto != null && old != null) onUndo("Other side ticked too") {
+                                                val d = owner.draft ?: return@onUndo
+                                                val at = d.blocks.indexOfFirst { it.items.getOrNull(missing!!) == auto }
+                                                if (at >= 0) owner.put(d.copy(blocks = d.blocks.mapIndexed { i, b -> if (i == at) b.copy(items = b.items.toMutableList().also { it[missing!!] = old }) else b }))
+                                            }
+                                        }
+                                    }
+                                },
+                            )
+                            val mixed = right != null && right.item.type != item.type
+                            val leftHalf = half("Left", v, mixed)
+                            val rightHalf = right?.let { half("Right", it, mixed) }
+                            val nextHalf = if (!leftHalf.set.done) leftHalf else rightHalf?.takeIf { !it.set.done }
+                            if (slot != null && focusInfo == null && nextHalf != null) focusInfo = focusOf(if (nextHalf === leftHalf) v else right!!, nextHalf.side, nextHalf.set, nextHalf.previous, nextHalf.onFocus, nextHalf.onTick)
+                            PairRow(
+                                label = v.label, spoken = v.spoken, type = if (mixed) null else item.type, rpe = item.rpe, unit = unit, loadType = loadType,
+                                left = leftHalf, right = rightHalf,
+                                // One badge row for the round: each kind once, with the side or sides that earned it.
+                                records = sidesOf(live[index].orEmpty(), rightAt?.let { live[it] }.orEmpty()),
+                                onRecord = {
+                                    model.message = listOfNotNull(
+                                        records.weight?.let { "Best weight before: ${showWeight(it.value, unit)} $unit × ${it.reps}" },
+                                        records.estimated1Rm?.let { "best 1RM before: ${showWeight(Math.round(it.value * 10) / 10.0, unit)} $unit" },
+                                    ).joinToString(", ")
+                                },
+                                variations = quick.filter { it != name }.map { it to shortVariation(it, overall) },
+                                onVariation = { variation -> onBoth { it.copy(exercise = variation.takeIf { it != block.exercise }) } },
+                                onPlates = if ("barbell" in name.lowercase() && !cardio && !timed) ({ platesFor = item.weight.ifEmpty { hintWeight } to unit }) else null,
+                                onType = { type -> onBoth { it.copy(type = type) } },
+                                onHalfType = { second, type -> replace(if (second) rightAt!! else index, (block.items[if (second) rightAt!! else index] as DraftSet).copy(type = type)) },
+                                // Both sets go: the swipe and the menu's twin of it.
+                                onRemove = { onChange(block.copy(items = block.items.filterIndexed { i, _ -> i != index && i != rightAt })) },
+                            )
+                            return@forEachIndexed
+                        }
+                        val tickIt: () -> Unit = {
+                            if (item.done) replace(index, item.copy(done = false, rest = 0))
+                            else {
+                                // Each empty box takes the grey hint it shows, then the set is ticked as if typed.
+                                val taken = acceptHints(item.weight, item.reps, hintWeight, hintReps, loadType)
+                                if (taken == null) model.message = if (cardio) "Enter the minutes first" else if (timed) "Enter the seconds first" else "Enter the reps first"
+                                else replace(index, item.copy(weight = taken.weight, reps = taken.reps, done = true))
+                            }
+                        }
+                        val editIt = { reps: Boolean -> focusManager.clearFocus(); pad.focus(id, index, reps) }
+                        if (slot != null && focusInfo == null && !item.done) focusInfo = focusOf(v, null, item, before?.let { setValues(it, unit) }, editIt, tickIt)
+                        SetRow(
+                            set = item,
+                            label = v.label,
+                            spoken = v.spoken,
+                            unit = unit,
+                            loadType = loadType,
+                            // Last time's set at this position, with its type in brackets when it is not this set's own.
+                            previous = buildAnnotatedString {
+                                if (before == null) append(NONE) else {
+                                    append(setValues(before, unit))
+                                    if (tag != null) withStyle(SpanStyle(color = tagColor, fontWeight = FontWeight.Bold)) { append(" [${tag.letter}]") }
+                                }
+                                if (aim != null) withStyle(SpanStyle(fontWeight = FontWeight.Normal, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))) { append("  → $hintWeight × $hintReps") }
+                            },
+                            aimed = aim != null,
+                            hintWeight = hintWeight,
+                            hintReps = hintReps,
+                            record = live[index].orEmpty(),
+                            highlight = index == nextItem,
+                            focus = v.focus,
+                            onFocus = editIt,
+                            variations = quick.filter { it != name }.map { it to shortVariation(it, overall) },
+                            onVariation = { v -> replace(index, item.copy(exercise = v.takeIf { it != block.exercise })) },
+                            onPlates = if ("barbell" in name.lowercase() && !cardio && !timed) ({ platesFor = item.weight.ifEmpty { hintWeight } to unit }) else null,
+                            // Tapping last time's set copies it into the boxes.
+                            // The next set of a timed exercise can be timed with a stopwatch, which fills its seconds.
+                            onTimer = if (timed && index == nextItem) ({ timing = index to parseNumber(hintReps)?.toInt()?.takeIf { it > 0 } }) else null,
+                            timerRunning = model.stopwatchStart != null,
+                            onPrevious = if (before == null) null else ({ replace(index, item.copy(weight = lastWeight.orEmpty(), reps = lastReps.orEmpty())) }),
+                            onRecord = {
+                                model.message = listOfNotNull(
+                                    records.weight?.let { "Best weight before: ${showWeight(it.value, unit)} $unit × ${it.reps}" },
+                                    records.estimated1Rm?.let { "best 1RM before: ${showWeight(Math.round(it.value * 10) / 10.0, unit)} $unit" },
+                                ).joinToString(", ")
+                            },
+                            onChange = { replace(index, it) },
+                            onTick = tickIt,
+                        )
+                    }
+                }
+            }
+            if (slot != null) SideEffect { slot.info = focusInfo }
+            // A new set carries on as the variation of the one before it. Left and right: a pair is added, or the missing half.
+            QuietButton(
+                "Add set", {
+                    val last = block.items.filterIsInstance<DraftSet>().lastOrNull()
+                    val count = if (paired) setsToAddPair(block.items.count { it is DraftSet }) else 1
+                    onChange(block.copy(items = block.items + List(count) { DraftSet(type = if (count == 1 && paired) last?.type ?: SetType.NORMAL else SetType.NORMAL, exercise = last?.exercise) }))
+                },
+                Modifier.fillMaxWidth().padding(horizontal = Space.m, vertical = Space.s),
+            )
+        }
+        }
+    }
+
+    if (replacing) ExercisePicker(model, workouts, onPick = {
+        // A card logged left and right stays so; an exercise switched on starts paired.
+        val replaced = block.copy(exercise = it, targets = emptyList(), paired = block.paired || model.sidesOf(it))
+        onChange(if (replaced.paired) replaced.withPairsCompleted() else replaced)
+        replacing = false
+    }, onDismiss = { replacing = false })
+    if (switching) {
+        var label by remember { mutableStateOf("") }
+        var choosing by remember { mutableStateOf(false) }
+        var showAll by remember { mutableStateOf(false) }
+        val created = "$overall (${label.trim()})"
+        CleanDialog(
+            onDismissRequest = { switching = false },
+            title = { Text("Switch variation") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        "The sets not ticked yet carry on under the variation you pick, which keeps its own previous values and PRs.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    // The ones already done come first, then the few built in for this exercise; the rest of a big group waits behind a line.
+                    val done = variations.filter { it != block.exercise && model.hasHistory(it) }
+                    val own = remember(settings, block.exercise) { model.suggestedVariations(block.exercise) }.filter { it !in done }
+                    val rest = variations.filter { it != block.exercise && it !in done && it !in own }
+                    for (v in done) TextButton(onClick = { onSwitch(v); switching = false }) { Text(v) }
+                    for (v in if (showAll) own + rest else own) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { onSwitch(v); switching = false }, modifier = Modifier.weight(1f)) {
+                                Text(v, Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            // A built-in variation that is of no use can be taken off the list.
+                            IconButton(onClick = { model.leaveGroup(v) }) { Icon(CleanIcons.Close, "Remove this variation", Modifier.size(18.dp), tint = MaterialTheme.colorScheme.outline) }
+                        }
+                    }
+                    if (rest.isNotEmpty()) TextButton(onClick = { showAll = !showAll }) { Text(if (showAll) "Show fewer" else "${rest.size} more of $overall") }
+                    OutlinedTextField(label, { label = it }, label = { Text("New variation") }, placeholder = { Text("Wide Grip") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = Space.s))
+                    if (label.isNotBlank()) Text(created, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(onClick = { choosing = true }) { Text("Choose an existing exercise") }
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = label.isNotBlank(), onClick = { model.addVariation(block.exercise, created); onSwitch(created); switching = false }) { Text("Create") }
+            },
+            dismissButton = { TextButton(onClick = { switching = false }) { Text("Cancel") } },
+        )
+        if (choosing) ExercisePicker(model, workouts, onPick = { model.addVariation(block.exercise, it); onSwitch(it); choosing = false; switching = false }, onDismiss = { choosing = false })
+    }
+    if (warming) {
+        // The working weight is the next working set's, else the heaviest of last time; it can be typed over.
+        val guess = remember {
+            block.items.filterIsInstance<DraftSet>().firstOrNull { !it.done && it.type != SetType.WARMUP }?.weight?.ifEmpty { null }
+                ?: sessions.lastOrNull()?.sets?.filter { it.type != SetType.WARMUP }?.mapNotNull { it.weight }?.maxOrNull()?.let { entryWeight(it, unit) }.orEmpty()
+        }
+        var text by remember { mutableStateOf(guess) }
+        var scheme by model.remembered("warmupScheme", "3 sets")
+        val step = if (unit == "lb") 5.0 else weightStep(sessions)
+        val ladder = parseNumber(text)?.let { warmupSets(it, step, WARMUP_SCHEMES[scheme] ?: WARMUP_SCHEMES.getValue("3 sets")) }.orEmpty()
+        val barbell = "barbell" in block.exercise.lowercase()
+        val replaces = block.items.any { it is DraftSet && it.type == SetType.WARMUP && !it.done }
+        CleanDialog(
+            onDismissRequest = { warming = false },
+            title = { Text("Warm-up sets") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    OutlinedTextField(text, { text = it }, label = { Text("Working weight ($unit)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    Choice(WARMUP_SCHEMES.keys.toList(), scheme, { it }) { scheme = it }
+                    if (ladder.isEmpty()) Text("Enter a working weight heavy enough to have something under it.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    for (set in ladder) Column {
+                        Text("${shortNumber(set.weight)} $unit × ${set.reps}", fontWeight = FontWeight.Bold)
+                        if (barbell) Text(plateText(set.weight, unit, model.plateKit(unit)), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text("Weights are rounded to this exercise's step of ${shortNumber(step)} $unit.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = ladder.isNotEmpty(), onClick = {
+                    // They take the place of the warm-ups not ticked yet (a ticked one is work done, and stays); the old ones can be put back for a few seconds.
+                    val before = owner.draft
+                    // Left and right: a pair with one side ticked stays whole.
+                    val holding = if (paired) sidePairs(block.items.map { it is DraftSet }).filter { (l, r) -> listOfNotNull(l, r).any { (block.items[it] as DraftSet).done } }.flatMap { listOfNotNull(it.first, it.second) }.toSet() else emptySet()
+                    // Left and right: a pair is a warm-up only when both its halves are, so a pair with one working half stays whole.
+                    fun warmOf(list: List<DraftItem>): List<Boolean> {
+                        val pairs = if (paired) sidePairs(list.map { it is DraftSet }) else emptyList()
+                        return list.mapIndexed { i, it ->
+                            if (it !is DraftSet) false
+                            else if (!paired) it.type == SetType.WARMUP
+                            else pairs.first { p -> p.first == i || p.second == i }.let { p -> listOfNotNull(p.first, p.second).all { j -> (list[j] as DraftSet).type == SetType.WARMUP } }
+                        }
+                    }
+                    val warm = warmOf(block.items)
+                    val stays = block.items.mapIndexed { i, it -> it !is DraftSet || !warm[i] || it.done || i in holding }
+                    val items = block.items.filterIndexed { i, _ -> stays[i] }
+                    // Above the first set that is not a warm-up, under any note that opens the card and any warm-up already done.
+                    val warmLeft = warmOf(items)
+                    val at = items.indices.firstOrNull { items[it] is DraftSet && !warmLeft[it] } ?: items.size
+                    // Left and right: each warm-up is a pair.
+                    onChange(block.copy(items = items.take(at) + ladder.flatMap { w -> List(if (paired) 2 else 1) { DraftSet(SetType.WARMUP, shortNumber(w.weight), w.reps.toString()) } } + items.drop(at)))
+                    if (before != null && items.size < block.items.size) onUndo("Warm-up sets replaced") { owner.put(before) }
+                    warming = false
+                }) { Text(if (replaces) "Replace" else "Add") }
+            },
+            dismissButton = { TextButton(onClick = { warming = false }) { Text("Cancel") } },
+        )
+    }
+    if (progressing) ProgressionDialog(model, block.exercise, unit, sessions) { progressing = false }
+    if (resting) {
+        CleanDialog(
+            onDismissRequest = { resting = false },
+            title = { Text("Rest after a set") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    Text("For ${block.exercise}. “Default” follows the length set in Settings.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val own = settings[block.exercise]?.rest ?: -1
+                    RestChoice(
+                        "Rest after a set", own, listOf(-1, 0, 30, 60, 90, 120, 180, 300),
+                        { seconds -> model.putSetting(block.exercise) { it.copy(rest = seconds) } },
+                        value = if (own < 0) "Default · ${restLabel(model.restDefault.value)}" else restLabel(own), unset = "Default",
+                    )
+                }
+            },
+            confirmButton = { TextButton(onClick = { resting = false }) { Text("Done") } },
+        )
+    }
+    timing?.let { (at, last) ->
+        // The clock lives in the model, so it keeps running when the sheet is put away and opened again.
+        var down by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) { model.startStopwatch() }
+        Sheet({ timing = null }, "Timer") {
+            // Read in here, so only the sheet is redrawn each second.
+            val begun = model.stopwatchStart ?: System.currentTimeMillis()
+            val elapsed = ((nowMillis() - begun) / 1000).coerceAtLeast(0)
+            Text(
+                if (down && last != null) (if (elapsed < last) clock(last - elapsed) else "+" + clock(elapsed - last)) else clock(elapsed),
+                Modifier.fillMaxWidth().padding(vertical = Space.l), textAlign = TextAlign.Center, style = MaterialTheme.typography.displayLarge.numbers(), fontWeight = FontWeight.Bold,
+            )
+            if (last != null) Column(Modifier.padding(horizontal = Space.l)) {
+                Choice(listOf(false, true), down, { if (it) "Count down from last time" else "Count up" }) { down = it; model.startStopwatch(if (it) last else null) }
+            }
+            MainButton("Stop and fill", {
+                val seconds = model.stopStopwatch()
+                (block.items.getOrNull(at) as? DraftSet)?.let { replace(at, it.copy(reps = seconds.toString())) }
+                timing = null
+            }, Modifier.fillMaxWidth().padding(Space.l))
+        }
+    }
+    var editingPlates by remember { mutableStateOf<String?>(null) }
+    platesFor?.let { (text, plateUnit) ->
+        val total = parseNumber(text)
+        val stored by model.options.collectAsState()
+        val kit = remember(stored, plateUnit) { model.plateKit(plateUnit) }
+        CleanDialog(
+            onDismissRequest = { platesFor = null },
+            title = { Text(if (total == null) "Plates" else "${shortNumber(total)} $plateUnit") },
+            text = { Text(if (total == null) "Enter a weight first." else plateText(total, plateUnit, kit)) },
+            confirmButton = { TextButton(onClick = { platesFor = null }) { Text("Close") } },
+            dismissButton = { TextButton(onClick = { editingPlates = plateUnit }) { Text("Bar and plates") } },
+        )
+    }
+    editingPlates?.let { PlateKitDialog(model, it) { editingPlates = null } }
+    if (explaining) {
+        CleanDialog(
+            onDismissRequest = { explaining = false },
+            title = { Text("Set types") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    Text("Tap a set's number to change its type. Swipe a set to the left to remove it.")
+                    for (type in SetType.entries) {
+                        Text(
+                            when (type) {
+                                SetType.NORMAL -> "1, 2, 3  A normal working set."
+                                SetType.WARMUP -> "W  Warm-up: left out of set counts, volume and PRs."
+                                SetType.FAILURE -> "F  Taken to failure: counts like a normal set."
+                                SetType.DROP -> "D  Drop set: counts in sets and volume, but sets no PRs."
+                            },
+                            color = typeColor(type),
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { explaining = false }) { Text("Close") } },
+        )
+    }
+    if (editingSticky) {
+        var text by remember { mutableStateOf(sticky) }
+        CleanDialog(
+            onDismissRequest = { editingSticky = false },
+            title = { Text("Sticky note") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    Text("Stays on ${block.exercise} in every workout until you change it: a seat setting, a cue. Clear it to remove it.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(text, { text = it }, modifier = Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = { TextButton(onClick = { model.putSetting(block.exercise) { it.copy(note = text.trim()) }; editingSticky = false }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { editingSticky = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** The rep range and weight step of an exercise's double progression; "Off" takes it away. Used from a workout's card and from the exercise's page. */
+@Composable
+fun ProgressionDialog(model: AppModel, exercise: String, unit: String, sessions: List<clean.core.Session>, onDismiss: () -> Unit) {
+    val current = model.progressions.collectAsState().value[exercise]
+    var low by remember { mutableStateOf((current?.minReps ?: 8).toString()) }
+    var high by remember { mutableStateOf((current?.maxReps ?: 12).toString()) }
+    var stepText by remember { mutableStateOf(current?.let { showWeight(it.step, unit) } ?: if (unit == "lb") "5" else shortNumber(weightStep(sessions))) }
+    val scheme = low.trim().toIntOrNull()?.let { min -> high.trim().toIntOrNull()?.let { max -> parseNumber(stepText)?.let { Progression(min, max, toKg(it, unit)) } } }
+        ?.takeIf { it.minReps in 1..it.maxReps && it.step > 0 }
+    CleanDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Progression") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                Text(
+                    "For $exercise. Add reps up to the top of the range; when every set gets there at one weight, the next workout goes up by the step and starts at the bottom again. A set to failure or at RPE 9.5 or more repeats.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                    OutlinedTextField(low, { low = it }, label = { Text("From reps") }, singleLine = true, modifier = Modifier.weight(1f))
+                    OutlinedTextField(high, { high = it }, label = { Text("To reps") }, singleLine = true, modifier = Modifier.weight(1f))
+                }
+                OutlinedTextField(stepText, { stepText = it }, label = { Text("Step ($unit)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = { TextButton(enabled = scheme != null, onClick = { model.setProgression(exercise, scheme); onDismiss() }) { Text("Save") } },
+        dismissButton = {
+            Row {
+                if (current != null) TextButton(onClick = { model.setProgression(exercise, null); onDismiss() }) { Text("Off") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
+}
+
+/**
+ * What the ticked sets of a card earn against the history of the variation each was done as, by the
+ * same rule as a finished workout (`SidedBests.judge`), so a badge shown now is the badge saved with the
+ * workout. By position in [block]. Cardio earns none. In a left and right card each half is judged
+ * against its own side's history.
+ */
+private fun liveRecords(block: DraftBlock, contexts: Map<String, SetContext>, bodyweight: Double?, rule: OneRm): Map<Int, Set<PrKind>> {
+    val kinds = HashMap<Int, Set<PrKind>>()
+    val sides = HashMap<Int, Side>()
+    if (block.paired) for ((left, right) in sidePairs(block.items.map { it is DraftSet })) {
+        sides[left] = Side.LEFT
+        right?.let { sides[it] = Side.RIGHT }
+    }
+    val ticked = block.items.withIndex().filter { (it.value as? DraftSet)?.done == true }
+    for ((name, mine) in ticked.groupBy { (it.value as DraftSet).exercise ?: block.exercise }) {
+        val c = contexts[name] ?: contexts.getValue(block.exercise)
+        if (c.loadType == LoadType.CARDIO) continue
+        // The boxes are read as they are saved: a timed set's second box is seconds, any other's is reps.
+        val sets = mine.map { (_, item) ->
+            val set = item as DraftSet
+            val kg = parseNumber(set.weight)?.let { toKg(it, c.unit) }
+            if (c.loadType == LoadType.TIMED) PrSet(set.type, kg, null, parseNumber(set.reps)) else PrSet(set.type, kg, set.reps.trim().toIntOrNull(), null, set.rpe.toDoubleOrNull())
+        }
+        c.bests.judge(sets, mine.map { sides[it.index] }, c.loadType, bodyweight, rule, commit = false).forEachIndexed { i, set -> kinds[mine[i].index] = set }
+    }
+    return kinds
+}
+
+@Composable
+private fun SetRow(
+    set: DraftSet,
+    label: String,
+    /** How a screen reader names the set: "Set 2". */
+    spoken: String,
+    unit: String,
+    loadType: LoadType,
+    previous: AnnotatedString,
+    /** Whether [previous] ends with a target, which may need a second line. */
+    aimed: Boolean,
+    hintWeight: String,
+    hintReps: String,
+    /** What the set has earned, once ticked. */
+    record: Set<PrKind>,
+    highlight: Boolean,
+    /** Which of this row's boxes the number pad is on: 0 for neither, 1 for the weight, 2 for the reps. */
+    focus: Int,
+    onFocus: (Boolean) -> Unit,
+    variations: List<Pair<String, String>>,
+    onVariation: (String) -> Unit,
+    onPlates: (() -> Unit)?,
+    onPrevious: (() -> Unit)?,
+    /** A stopwatch for this set, shown beside last time's set; the accent while the clock runs. */
+    onTimer: (() -> Unit)?,
+    timerRunning: Boolean,
+    onRecord: () -> Unit,
+    onChange: (DraftSet?) -> Unit,
+    onTick: () -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    val colors = LocalCleanColors.current
+    val motion = LocalMotion.current
+    // A set just ticked: its box bounces and the phone gives a short buzz.
+    val pop = remember { Animatable(1f) }
+    var was by remember { mutableStateOf(set.done) }
+    val haptic = LocalHapticFeedback.current
+    val dense = LocalDense.current
+    val feel = LocalFeel.current
+    LaunchedEffect(set.done) {
+        if (set.done && !was) {
+            tickBuzz(haptic, feel.tick)
+            if (motion) {
+                pop.snapTo(0.75f)
+                pop.animateTo(1f, Motion.reward())
+            }
+        }
+        was = set.done
+    }
+    // The set to do next is tinted with the accent, one that is done with the green of its tick.
+    val skin = workoutSkin()
+    val tint by animateColorAsState(
+        when {
+            set.done -> skin.rowDone
+            highlight -> skin.rowNext
+            else -> Color.Transparent
+        },
+        animationSpec = Motion.quick(), label = "row",
+    )
+    val box by animateColorAsState(if (set.done) skin.tickDone else skin.tickIdle, Motion.quick(), label = "tick")
+    // Swiping the row to the left removes the set.
+    SetSwipe(set.done, onTick, { onChange(null) }) {
+    Column {
+    Row(
+        Modifier.padding(horizontal = Space.xs).prCelebration(PrKind.ONE_RM in record).background(tint, SmallShape).padding(start = Space.xs, end = Space.s, top = if (dense) 1.dp else Space.xs, bottom = if (dense) 1.dp else Space.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // The set's number or letter; tapping it changes the type or removes the set.
+        val typeWords = typeName(set.type).lowercase()
+        Box(
+            Modifier.width(44.dp).requiredSizeIn(minWidth = 48.dp, minHeight = 48.dp).clickable(onClickLabel = "Change type") { menu = true }
+                .semantics { contentDescription = "$spoken, $typeWords${if (set.rpe.isEmpty()) "" else ", RPE ${set.rpe}"}. Change type" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(label, color = typeColor(set.type), fontWeight = FontWeight.Bold)
+                if (set.rpe.isNotEmpty()) Text("@${set.rpe}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            DropdownMenu(menu, { menu = false }) {
+                for (type in SetType.entries) {
+                    DropdownMenuItem({ Text(typeName(type), color = typeColor(type)) }, { menu = false; onChange(set.copy(type = type)) })
+                }
+                if (variations.isNotEmpty()) {
+                    // This set alone as another variation.
+                    HorizontalDivider()
+                    for ((name, short) in variations) DropdownMenuItem({ Text("As $short") }, { menu = false; onVariation(name) })
+                }
+                if (onPlates != null) {
+                    HorizontalDivider()
+                    DropdownMenuItem({ Text("Plates for this weight") }, { menu = false; onPlates() })
+                }
+                // The swipe's twin, for whoever cannot swipe.
+                HorizontalDivider()
+                DropdownMenuItem({ Text("Remove set", color = colors.danger) }, { menu = false; onChange(null) })
+            }
+        }
+        if (!dense) Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(previous, Modifier.clickable(enabled = onPrevious != null) { onPrevious?.invoke() }, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = if (aimed) 2 else 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
+                if (onTimer != null) Box(Modifier.minTouch().clickable(onClick = onTimer), contentAlignment = Alignment.Center) {
+                    Icon(CleanIcons.Timer, "Time this set", tint = if (timerRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            AnimatedVisibility(record.isNotEmpty(), enter = Motion.appear(motion), exit = Motion.vanish(motion)) {
+                PrBadges(record, Modifier.clickable(onClick = onRecord))
+            }
+        }
+        // Compact rows have no Previous column to hold the timer, so it sits before the boxes.
+        else if (onTimer != null) Box(Modifier.minTouch().clickable(onClick = onTimer), contentAlignment = Alignment.Center) {
+            Icon(CleanIcons.Timer, "Time this set", tint = if (timerRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        // What each box holds, in words: its set, which box, the value and its unit.
+        val (weightWord, repsWord) = when (loadType) {
+            LoadType.CARDIO -> "distance" to "time"
+            LoadType.TIMED -> "weight" to "time"
+            else -> "weight" to "reps"
+        }
+        val weightUnit = if (loadType == LoadType.CARDIO) "kilometres" else if (unit == "lb") "pounds" else "kilograms"
+        val repsUnit = if (loadType == LoadType.CARDIO) "minutes" else if (loadType == LoadType.TIMED) "seconds" else "reps"
+        PadField(set.weight, hintWeight, focus == 1, (if (dense) Modifier.weight(1f) else Modifier.width(84.dp)).padding(horizontal = Space.xs), "$spoken $weightWord, ${if (set.weight.isEmpty()) "empty" else "${set.weight} $weightUnit"}") { onFocus(false) }
+        PadField(set.reps, hintReps, focus == 2, (if (dense) Modifier.weight(1f) else Modifier.width(84.dp)).padding(horizontal = Space.xs), "$spoken $repsWord, ${if (set.reps.isEmpty()) "empty" else "${set.reps} $repsUnit"}") { onFocus(true) }
+        // The whole cell is the checkbox; the press ripple stays on the box drawn in it. Correcting a finished workout has no ticks:
+        // the place stays, empty, so the boxes line up as in a workout.
+        val tickSource = remember { MutableInteractionSource() }
+        val noTicks = LocalDraftSlot.current?.correcting == true
+        Box(
+            Modifier.width(44.dp).requiredSizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                .then(if (noTicks) Modifier else Modifier.toggleable(set.done, tickSource, null, role = Role.Checkbox) { onTick() }
+                    .semantics { contentDescription = spoken; stateDescription = if (set.done) "done" else "not done" }),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!noTicks) Surface(
+                color = box,
+                shape = SmallShape,
+                border = if (skin.tickIdleBorder == Color.Transparent) null else BorderStroke(skin.lineWidth, skin.tickIdleBorder),
+                modifier = Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value }.size(width = 40.dp, height = 36.dp).clip(SmallShape).indication(tickSource, LocalIndication.current),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(CleanIcons.Check, null, tint = if (set.done) skin.checkDone else skin.checkIdle)
+                }
+            }
+        }
+    }
+    // Without the Previous column the badges sit on a line of their own under the row.
+    if (dense) AnimatedVisibility(record.isNotEmpty(), enter = Motion.appear(motion), exit = Motion.vanish(motion)) {
+        PrBadges(record, Modifier.padding(start = 56.dp, end = Space.m, bottom = Space.xxs).clickable(onClick = onRecord))
+    }
+    }
+    }
+}
+
+/** The gap between a pair's two halves; the column heads over them use the same one. */
+private val SIDES_GAP = 4.dp
+
+/** What one set of a card was read against and shows, worked out once for its row. */
+private class SetView(
+    val index: Int, val item: DraftSet, val name: String, val c: SetContext, val label: String, val spoken: String,
+    val before: clean.core.SetItem?, val aim: Target?, val lastWeight: String?, val lastReps: String?,
+    val hintWeight: String, val hintReps: String,
+    /** Which of its boxes the number pad is on: 0 for neither, 1 for the weight, 2 for the reps. */
+    val focus: Int, val padMeta: PadMeta?,
+    /** Whether it is the first set done as a variation other than the one before it. */
+    val newVariation: Boolean,
+)
+
+/** One side of a left and right pair: a set with its own boxes and tick. */
+private class Half(
+    val set: DraftSet, val side: String,
+    /** Whether this round's halves differ in kind: each half then shows its own kind. */
+    val mixed: Boolean,
+    /** How a screen reader names it: "Set 2 left". */
+    val spoken: String,
+    /** Last time's matching set, as text; null when there was none. */
+    val previous: String?,
+    val hintWeight: String, val hintReps: String, val highlight: Boolean, val focus: Int,
+    val onFocus: (Boolean) -> Unit, val onPrevious: (() -> Unit)?, val onTick: () -> Unit,
+)
+
+/**
+ * A left and right pair as one row: the round's number or letter (its kind, when both halves share one; a round whose halves differ shows its number and each half its own letter), then the two
+ * halves side by side, and under them one row of badges: what the round earned, each kind once with the side or sides
+ *  * that earned it. A pair is removed, re-typed and given a variation as a whole, or a half is re-typed on its own (a hold on the half, its side mark, or the round menu). [right] is null for a last set
+ * left without its partner.
+ */
+@Composable
+private fun PairRow(
+    label: String, spoken: String, type: SetType?, rpe: String, unit: String, loadType: LoadType,
+    left: Half, right: Half?, records: List<Pair<PrKind, Set<Side>>>, onRecord: () -> Unit,
+    variations: List<Pair<String, String>>, onVariation: (String) -> Unit, onPlates: (() -> Unit)?, onType: (SetType) -> Unit, onHalfType: (Boolean, SetType) -> Unit, onRemove: () -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    // The side whose own kind is being changed, if any.
+    var sideType by remember { mutableStateOf<Side?>(null) }
+    val colors = LocalCleanColors.current
+    val dense = LocalDense.current
+    val motion = LocalMotion.current
+    // A swipe acts on the round as one half at a time: the first half not done, else (all done) the last one is un-ticked.
+    val swipeHalf = if (!left.set.done) left else if (right != null && !right.set.done) right else right ?: left
+    SetSwipe(swipeHalf.set.done, swipeHalf.onTick, onRemove) {
+      Column {
+        Row(Modifier.padding(horizontal = Space.xs).prCelebration(records.any { it.first == PrKind.ONE_RM }).padding(start = Space.xs, end = Space.s, top = if (dense) 1.dp else Space.xs, bottom = if (dense) 1.dp else Space.xs), verticalAlignment = Alignment.CenterVertically) {
+            val typeWords = type?.let { typeName(it).lowercase() } ?: "left ${typeName(left.set.type).lowercase()}, right ${right?.set?.type?.let(::typeName)?.lowercase()}"
+            Box(
+                Modifier.width(44.dp).requiredSizeIn(minWidth = 48.dp, minHeight = 48.dp).clickable(onClickLabel = "Change type") { menu = true }
+                    .semantics { contentDescription = "$spoken, $typeWords${if (rpe.isEmpty()) "" else ", RPE $rpe"}. Change type" },
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(label, color = type?.let { typeColor(it) } ?: Color.Unspecified, fontWeight = FontWeight.Bold)
+                    if (rpe.isNotEmpty()) Text("@$rpe", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                DropdownMenu(menu, { menu = false }) {
+                    for (t in SetType.entries) DropdownMenuItem({ Text(typeName(t), color = typeColor(t)) }, { menu = false; onType(t) })
+                    // One side on its own (a hold on a half does the same).
+                    if (right != null) {
+                        HorizontalDivider()
+                        DropdownMenuItem({ Text("Left side type…") }, { menu = false; sideType = Side.LEFT })
+                        DropdownMenuItem({ Text("Right side type…") }, { menu = false; sideType = Side.RIGHT })
+                    }
+                    if (variations.isNotEmpty()) {
+                        HorizontalDivider()
+                        for ((name, short) in variations) DropdownMenuItem({ Text("As $short") }, { menu = false; onVariation(name) })
+                    }
+                    if (onPlates != null) {
+                        HorizontalDivider()
+                        DropdownMenuItem({ Text("Plates for this weight") }, { menu = false; onPlates() })
+                    }
+                    HorizontalDivider()
+                    DropdownMenuItem({ Text("Remove set", color = colors.danger) }, { menu = false; onRemove() })
+                }
+            }
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(SIDES_GAP)) {
+                SideHalf(left, unit, loadType, Modifier.weight(1f)) { sideType = Side.LEFT }
+                if (right != null) SideHalf(right, unit, loadType, Modifier.weight(1f)) { sideType = Side.RIGHT } else Spacer(Modifier.weight(1f))
+            }
+        }
+        AnimatedVisibility(records.isNotEmpty(), enter = Motion.appear(motion), exit = Motion.vanish(motion)) {
+            PrBadges(
+                records.mapTo(HashSet()) { it.first }, Modifier.padding(start = 56.dp, end = Space.m, bottom = Space.xs).clickable(onClick = onRecord),
+                sides = records.toMap(),
+            )
+        }
+      }
+    }
+    sideType?.let { side ->
+        val half = if (side == Side.LEFT) left else right ?: left
+        val name = if (side == Side.LEFT) "Left" else "Right"
+        CleanDialog(
+            onDismissRequest = { sideType = null },
+            title = { Text("$name side: change type") },
+            text = {
+                Column {
+                    for (t in SetType.entries) TextButton(
+                        onClick = { sideType = null; onHalfType(side == Side.RIGHT, t) },
+                        Modifier.fillMaxWidth().minTouch(),
+                    ) {
+                        Text(typeName(t) + if (t == half.set.type) " (now)" else "", Modifier.fillMaxWidth(), color = typeColor(t))
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { sideType = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+/**
+ * One half of a pair: its weight and reps boxes and its tick over a quiet line holding the side's letter and last
+ * time's matching set. Done it is tinted green, next to do it takes the accent, else a faint container; the tick pops.
+ */
+@Composable
+private fun SideHalf(h: Half, unit: String, loadType: LoadType, modifier: Modifier, onChangeType: () -> Unit) {
+    val dense = LocalDense.current
+    val motion = LocalMotion.current
+    val pop = remember { Animatable(1f) }
+    var was by remember { mutableStateOf(h.set.done) }
+    val haptic = LocalHapticFeedback.current
+    val feel = LocalFeel.current
+    LaunchedEffect(h.set.done) {
+        if (h.set.done && !was) {
+            tickBuzz(haptic, feel.tick)
+            if (motion) {
+                pop.snapTo(0.75f)
+                pop.animateTo(1f, Motion.reward())
+            }
+        }
+        was = h.set.done
+    }
+    val skin = workoutSkin()
+    val tint by animateColorAsState(
+        when {
+            h.set.done -> skin.rowDone
+            h.highlight -> skin.rowNext
+            else -> skin.rowIdleHalf
+        },
+        animationSpec = Motion.quick(), label = "half",
+    )
+    val box by animateColorAsState(if (h.set.done) skin.tickDone else skin.tickIdle, Motion.quick(), label = "tick")
+    val (weightWord, repsWord) = when (loadType) {
+        LoadType.CARDIO -> "distance" to "time"
+        LoadType.TIMED -> "weight" to "time"
+        else -> "weight" to "reps"
+    }
+    val weightUnit = if (loadType == LoadType.CARDIO) "kilometres" else if (unit == "lb") "pounds" else "kilograms"
+    val repsUnit = if (loadType == LoadType.CARDIO) "minutes" else if (loadType == LoadType.TIMED) "seconds" else "reps"
+    // A hold on the half (its padding and its quiet line) changes its kind on its own; the boxes and the tick keep their taps.
+    Column(
+        modifier.background(tint, SmallShape)
+            .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onLongClickLabel = "Change type", onLongClick = onChangeType, onClick = {})
+            .padding(horizontal = Space.xs, vertical = if (dense) 1.dp else Space.xs),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PadField(h.set.weight, h.hintWeight, h.focus == 1, Modifier.weight(1.2f).padding(end = Space.xxs), "${h.spoken} $weightWord, ${if (h.set.weight.isEmpty()) "empty" else "${h.set.weight} $weightUnit"}") { h.onFocus(false) }
+            PadField(h.set.reps, h.hintReps, h.focus == 2, Modifier.weight(1f).padding(end = Space.xxs), "${h.spoken} $repsWord, ${if (h.set.reps.isEmpty()) "empty" else "${h.set.reps} $repsUnit"}") { h.onFocus(true) }
+            // The whole cell is the checkbox; the press ripple stays on the box drawn in it. None on the Correct page.
+            val tickSource = remember { MutableInteractionSource() }
+            val noTicks = LocalDraftSlot.current?.correcting == true
+            Box(
+                Modifier.width(40.dp).requiredSizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                    .then(if (noTicks) Modifier else Modifier.toggleable(h.set.done, tickSource, null, role = Role.Checkbox) { h.onTick() }
+                        .semantics { contentDescription = h.spoken; stateDescription = if (h.set.done) "done" else "not done" }),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (!noTicks) Surface(
+                    color = box,
+                    shape = SmallShape,
+                    border = if (skin.tickIdleBorder == Color.Transparent) null else BorderStroke(skin.lineWidth, skin.tickIdleBorder),
+                    modifier = Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value }.size(width = 36.dp, height = 36.dp).clip(SmallShape).indication(tickSource, LocalIndication.current),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(CleanIcons.Check, null, tint = if (h.set.done) skin.checkDone else skin.checkIdle)
+                    }
+                }
+            }
+        }
+        // Compact rows leave out last time's set under the boxes, keeping the side mark only when the halves differ in kind.
+        if (!dense || h.mixed) Row(Modifier.fillMaxWidth().padding(horizontal = Space.xs), verticalAlignment = Alignment.CenterVertically) {
+            // The side letter is also this half's own kind control: it adds the kind's letter when the round's halves differ, and a tap changes it.
+            // A small slot in the line; the 48 dp hit area is centred on it and overlaps the air around, so the row keeps its height.
+            Box(Modifier.size(width = 24.dp, height = 16.dp), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier.reach().clickable(onClickLabel = "Change type", onClick = onChangeType)
+                        .semantics { contentDescription = "${h.side}, ${h.spoken.removeSuffix(" " + h.side.lowercase()).lowercase()}, ${typeName(h.set.type).lowercase()}, change type" },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row {
+                        Text(h.side.take(1), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (h.mixed) Text(h.set.type.letter.ifEmpty { "N" }, Modifier.padding(start = Space.xxs), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = if (h.set.type == SetType.NORMAL) MaterialTheme.colorScheme.onSurfaceVariant else typeColor(h.set.type))
+                    }
+                }
+            }
+            if (!dense) Text(
+                h.previous ?: NONE, Modifier.padding(start = Space.s).clickable(enabled = h.onPrevious != null) { h.onPrevious?.invoke() },
+                maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Which box the number pad is typing into: a card (by its key), a set in it, and its weight or its reps box. */
+private data class PadTarget(val card: String, val item: Int, val reps: Boolean)
+
+/** What the pad needs to know about that box: how big a step is, what an empty box stands for, and whether a decimal point is allowed. */
+private data class PadMeta(val step: Double, val hint: String, val decimal: Boolean, val above: String = "")
+
+/** The number pad's state: open on a box, or closed. */
+private class Pad {
+    var target by mutableStateOf<PadTarget?>(null)
+    var meta by mutableStateOf(PadMeta(1.0, "", false))
+    /** Until a key is pressed in a box just entered, the first digit replaces what is there. */
+    var fresh = true
+
+    /** The one way the pad goes away: no box is left in edit mode. What was typed stays in the box. */
+    fun close() {
+        target = null
+        fresh = true
+    }
+
+    fun focus(card: String, item: Int, reps: Boolean) {
+        target = PadTarget(card, item, reps)
+        fresh = true
+    }
+}
+
+/** A weight or reps box. Tapping it opens the app's own number pad, not the phone's keyboard. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PadField(value: String, placeholder: String, focused: Boolean, modifier: Modifier, description: String, onClick: () -> Unit) {
+    // Once the pad is up (it takes its place at once), the box being typed into is brought back above it.
+    val requester = remember { BringIntoViewRequester() }
+    LaunchedEffect(focused) {
+        if (focused) requester.bringIntoView()
+    }
+    val skin = workoutSkin()
+    Box(
+        modifier.bringIntoViewRequester(requester).clip(SmallShape).background(skin.boxFill)
+            .border(if (focused) skin.focusWidth else skin.lineWidth, if (focused) skin.focusBorder else skin.boxBorder, SmallShape)
+            .clickable(onClickLabel = "Edit", onClick = onClick).semantics { contentDescription = description }.padding(vertical = Space.s, horizontal = Space.xs),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            value.ifEmpty { placeholder }, maxLines = 1, style = MaterialTheme.typography.titleMedium.numbers(), fontWeight = FontWeight.Bold,
+            color = if (value.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+/**
+ * The number pad for weights and reps: digits on the left; on the right, putting it away, a step
+ * up and a step down (a weight step, or one rep), and on to the next box.
+ */
+@Composable
+private fun Keypad(meta: PadMeta, rpe: String?, onKey: (String) -> Unit, onRpe: (String) -> Unit, onNext: () -> Unit, onHide: () -> Unit) {
+    val haptic = LocalHapticFeedback.current
+    // [rpe] is the set's value ("" for none); null when the user has switched RPE off.
+    var picking by remember { mutableStateOf(false) }
+    val skin = workoutSkin()
+    @Composable
+    fun RowScope.Key(label: String, side: Boolean = false, main: Boolean = false, enabled: Boolean = true, icon: ImageVector? = null, spoken: String = label, width: Float = 1f, onClick: () -> Unit) {
+        val back = when {
+            main -> MaterialTheme.colorScheme.primary
+            side -> skin.keyFill
+            else -> Color.Transparent
+        }
+        val front = if (main) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+        val line = if (main || skin.keyBorder == Color.Transparent) Color.Transparent else skin.keyBorder.copy(alpha = if (enabled) 1f else 0.25f)
+        Box(
+            // 54 dp less the 3 dp air on each side: every key is at least 48 dp to the finger.
+            Modifier.weight(width).height(54.dp).padding(Space.xs).clip(cardShape()).background(back).border(skin.lineWidth, line, cardShape())
+                .pressable(enabled) { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); onClick() }
+                .semantics { role = Role.Button; if (spoken != label) contentDescription = spoken },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (icon != null) Icon(icon, label, tint = front)
+            else Text(label, style = if (side || main) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = if (enabled) front else front.copy(alpha = 0.25f))
+        }
+    }
+    Surface(color = skin.padFill, shape = SheetTopShape, border = if (skin.padBorder == Color.Transparent) null else BorderStroke(skin.lineWidth, skin.padBorder)) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = Space.s, vertical = Space.s)) {
+            val step = shortNumber(meta.step)
+            // How hard the set felt: the scale opens above the keys in two rows, and the value chosen is tapped again to clear it.
+            if (picking && rpe != null) for (line in RPE_VALUES.chunked(5)) Row(Modifier.padding(bottom = Space.xs)) {
+                for (value in line) {
+                    val on = value == rpe
+                    Text(
+                        value, textAlign = TextAlign.Center, fontWeight = FontWeight.SemiBold, color = if (on) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f).padding(Space.xxs).clip(SmallShape).background(if (on) MaterialTheme.colorScheme.primary else skin.keyFill)
+                            .border(skin.lineWidth, if (on || skin.keyBorder == Color.Transparent) Color.Transparent else skin.keyBorder, SmallShape)
+                            .selectable(on, role = Role.RadioButton) { onRpe(if (on) "" else value) }.semantics { contentDescription = "RPE $value" }
+                            .heightIn(min = 48.dp).wrapContentHeight(Alignment.CenterVertically),
+                    )
+                }
+                // The shorter second row keeps the first row's widths.
+                repeat(5 - line.size) { Spacer(Modifier.weight(1f).padding(Space.xxs)) }
+            }
+            // Five columns: the digits (the close key under 7), then a column of steps and effort, then Next, Same and Delete, each a key of its own.
+            Row {
+                for (d in "123") Key(d.toString()) { onKey(d.toString()) }
+                Key("−$step", side = true, spoken = "Down $step") { onKey("-") }
+                Key("Next", main = true, onClick = onNext)
+            }
+            Row {
+                for (d in "456") Key(d.toString()) { onKey(d.toString()) }
+                Key("+$step", side = true, spoken = "Up $step") { onKey("+") }
+                Key("Same", side = true, enabled = meta.above.isNotEmpty(), spoken = "Same as the set above") { onKey("same") }
+            }
+            Row {
+                for (d in "789") Key(d.toString()) { onKey(d.toString()) }
+                // RPE when switched on; its place stays empty when it is off.
+                if (rpe != null) Key(rpe.ifEmpty { "RPE" }, side = true, spoken = if (rpe.isEmpty()) "Effort, RPE" else "Effort, RPE $rpe") { picking = !picking }
+                else Spacer(Modifier.weight(1f))
+                Key("⌫", side = true, spoken = "Delete") { onKey("back") }
+            }
+            // The close key under 7, 0 under 8, the point under 9; the two columns to the right are empty on this row.
+            Row {
+                Key("Hide", side = true, icon = CleanIcons.ChevronDown, spoken = "Close keyboard", onClick = onHide)
+                Key("0") { onKey("0") }
+                Key(".", enabled = meta.decimal, spoken = "Decimal point") { onKey(".") }
+                Spacer(Modifier.weight(2f))
+            }
+        }
+    }
+}
+
+/** The scale for how hard a set felt, as Strong has it: 6 to 10 in half steps. */
+private val RPE_VALUES = listOf("6", "6.5", "7", "7.5", "8", "8.5", "9", "9.5", "10")
+
+/** Full-screen chooser over the user's exercises and the library; a name that matches nothing can be created. */
+@Composable
+fun ExercisePicker(model: AppModel, workouts: List<Workout>, onPick: (String) -> Unit, onDismiss: () -> Unit, onPickMany: ((List<String>) -> Unit)? = null) {
+    val settings by model.settings.collectAsState()
+    val hide = model.flag("library.hide")
+    val all = remember(workouts, settings) { allExercises(workouts, settings.keys) }
+    // The muscles the list shows are the user's own where set, as everywhere else.
+    val musclesOf = remember(settings) { { name: String -> model.musclesOf(name) } }
+    // With [onPickMany] several can be ticked, in the order they are to be added.
+    val ticked = remember { mutableStateListOf<String>() }
+    // Its window blinks in and out in place, as every page does.
+    val drop = onDismiss
+    Dialog(onDismissRequest = drop, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        BlinkWindow()
+        Surface(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize()) {
+                ExerciseList(
+                    all, musclesOf, onClick = onPick, modifier = Modifier.imePadding(), onCreate = onPick,
+                    leading = { IconButton(onClick = drop) { Icon(CleanIcons.Close, "Close") } },
+                    favourites = settings.filterValues { it.favourite }.keys, hideLibrary = hide,
+                    ticked = if (onPickMany != null) ticked else null, onTick = { if (!ticked.remove(it)) ticked.add(it) },
+                )
+                if (onPickMany != null && ticked.isNotEmpty()) MainButton(
+                    "Add ${ticked.size}", { onPickMany(ticked.toList()) },
+                    Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(Space.l).fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Correcting a finished workout (`AppModel.correction`, opened from its page's Edit): its own page, apart from any workout in
+ * progress. The name, the note, the start and the end can be changed, and the cards are the workout's own with no ticks: every
+ * set that holds its values counts. There is no clock, rest, banner or notification. Save puts the corrected workout in place of
+ * the old one; leaving with changes asks first.
+ */
+@Composable
+fun CorrectScreen(model: AppModel) {
+    val draft = model.correction
+    if (draft == null) {
+        // Only while this page is the one on top: as it goes it must not take the page under it along.
+        LaunchedEffect(Unit) { if (model.stack.lastOrNull() == Screen.Correct) model.back() }
+        return
+    }
+    val slot = model.correctionSlot
+    val workouts by model.workouts.collectAsState()
+    var picking by remember { mutableStateOf(false) }
+    var leaving by remember { mutableStateOf(false) }
+    val offerUndo = { what: String, restore: () -> Unit -> model.say(what) { restore() } }
+    val stored by model.options.collectAsState()
+    val keys = remember(draft.blocks) { cardKeys(draft.blocks) }
+    val keysNow by rememberUpdatedState(keys)
+    val pad = remember { Pad() }
+    val actions = remember(pad) { PadActions(pad, slot) { keysNow } }
+    val density = LocalDensity.current
+    val ime = WindowInsets.ime
+    LaunchedEffect(ime, density) {
+        snapshotFlow { ime.getBottom(density) > 0 }.distinctUntilChanged().collect { if (it) pad.close() }
+    }
+    fun leave() {
+        if (model.correctionChanged) leaving = true
+        else {
+            model.discardCorrection()
+            model.back()
+        }
+    }
+    BackHandler(enabled = pad.target != null) { pad.close() }
+    BackHandler(enabled = pad.target == null) { leave() }
+    val start = draft.pastDate?.let { clean.core.parseStrongDate(it) }
+    val seconds = draft.pastSeconds ?: 0L
+    val timesOk = start != null && seconds > 0
+
+    fun save() {
+        pad.close()
+        if (model.saveCorrection()) {
+            model.back()
+            model.message = "Workout corrected"
+        } else model.message = if (!timesOk) "The end must be after the start" else "No set holds its values, so there is nothing to save"
+    }
+
+    /** A card changed (or was removed, when [changed] is null); a set or an exercise taken away can be put back for a few seconds. */
+    fun blockChanged(index: Int, block: DraftBlock, changed: DraftBlock?) {
+        val current = slot.draft ?: return
+        val blocks = current.blocks.toMutableList()
+        if (changed == null) blocks.removeAt(index) else blocks[index] = changed
+        if (changed == null) offerUndo("Exercise removed") { slot.put(current) }
+        else if (changed.items.count { it is DraftSet } < block.items.count { it is DraftSet }) offerUndo("Set removed") { slot.put(current) }
+        slot.put(current.copy(blocks = blocks))
+    }
+
+    // A swipe that would tick a set does nothing here; one that removes still removes.
+    fun noFinish(kind: String) = if (kind == "finish") "off" else kind
+    val feel = Feel(stored["feedback.tick"] ?: "light", "none", noFinish(stored["swipe.right"] ?: "finish"), noFinish(stored["swipe.left"] ?: "delete"))
+    CompositionLocalProvider(LocalFeel provides feel, LocalDense provides (stored["workout.rows"] == "compact"), LocalDraftSlot provides slot) {
+        Scaffold(
+            modifier = Modifier.imePadding(), containerColor = pageContainer(),
+            topBar = {
+                // The page's own bar, as every page has; Back asks first when something was changed.
+                BackBar("Correct workout", ::leave) {
+                    MainButton("Save", ::save, Modifier.padding(end = Space.s), enabled = timesOk, contentPadding = PaddingValues(horizontal = Space.l, vertical = Space.s))
+                }
+            },
+            bottomBar = {
+                AnimatedVisibility(pad.target != null, enter = Motion.appear(LocalMotion.current), exit = Motion.vanish(LocalMotion.current)) {
+                    val rpeOn = model.flag("workout.rpe")
+                    val rpeNow = pad.target?.let { t -> (draft.blocks.getOrNull(keys.indexOf(t.card))?.items?.getOrNull(t.item) as? DraftSet)?.rpe }.orEmpty()
+                    Keypad(pad.meta, if (rpeOn) rpeNow else null, actions::key, { value -> actions.set { it.copy(rpe = value) } }, actions::next, onHide = pad::close)
+                }
+            },
+        ) { padding ->
+            LazyColumn(Modifier.padding(padding).fillMaxSize()) {
+                item { CorrectHeader(model, draft) }
+                itemsIndexed(draft.blocks, key = { i, _ -> keys[i] }) { index, block ->
+                    val last = draft.blocks.lastIndex
+                    // Moved from the card's menu; there is no holding and dragging here.
+                    val reorder = remember(index, last) {
+                        Reorder(
+                            collapsed = false, lifted = false, canUp = index > 0, canDown = index < last, move = { model.moveExercise(index, it, slot) },
+                            start = {}, drag = {}, end = {}, held = false, offset = { 0f }, next = false, superset = { model.toggleSuperset(index, slot) },
+                        )
+                    }
+                    BlockCard(model, workouts, block, reorder, keys[index], pad, Modifier, onSwitch = { model.switchVariation(index, it, slot) }, onUndo = offerUndo) { changed -> blockChanged(index, block, changed) }
+                }
+                item {
+                    Column(Modifier.fillMaxWidth().padding(Space.l), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                        QuietButton("Add exercise", { picking = true }, Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(120.dp))
+                    }
+                }
+            }
+        }
+    }
+    if (picking) ExercisePicker(
+        model, workouts, onPick = { model.addExercise(it, slot); picking = false }, onDismiss = { picking = false },
+        onPickMany = { names -> names.forEach { model.addExercise(it, slot) }; picking = false },
+    )
+    if (leaving) Confirm("Discard changes?", "The workout stays as it was saved.", "Discard", {
+        model.discardCorrection()
+        model.back()
+    }) { leaving = false }
+}
+
+/** The Correct page's top: the name and note, the start and end (the phone's pickers) and the time between them. */
+@Composable
+private fun CorrectHeader(model: AppModel, draft: Draft) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val start = draft.pastDate?.let { clean.core.parseStrongDate(it) }
+    val seconds = draft.pastSeconds ?: 0L
+    val end = start?.plusSeconds(seconds)
+    fun put(newStart: java.time.LocalDateTime, newEnd: java.time.LocalDateTime) = model.putCorrection(
+        draft.copy(pastDate = clean.core.STRONG_DATE_FORMAT.format(newStart), pastSeconds = java.time.Duration.between(newStart, newEnd).seconds),
+    )
+    Column(Modifier.padding(horizontal = Space.l, vertical = Space.s)) {
+        BasicTextField(
+            value = draft.name,
+            onValueChange = { model.putCorrection(draft.copy(name = it)) },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.headlineSmall.copy(color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        )
+        NoteLine(draft.note, { model.putCorrection(draft.copy(note = it)) })
+        if (start != null && end != null) {
+            // Moving the start keeps the end where it is, so the length follows; moving the end changes only the length.
+            LabelValue("Start", prettyDate(clean.core.STRONG_DATE_FORMAT.format(start))) { pickDateTime(context, start) { put(it, end) } }
+            LabelValue("End", prettyDate(clean.core.STRONG_DATE_FORMAT.format(end))) { pickDateTime(context, end) { put(start, it) } }
+            if (seconds > 0) LabelValue("Duration", duration(seconds))
+            else Text("The end must be after the start.", Modifier.padding(vertical = Space.xs), style = MaterialTheme.typography.bodySmall, color = LocalCleanColors.current.danger)
+        }
+    }
+}
