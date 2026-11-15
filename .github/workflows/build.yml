@@ -52,6 +52,10 @@ jobs:
           mkdir -p ~/.android
           echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore
 
+      # A checkout made from Windows can lose gradlew's executable bit.
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
       - name: Unit tests
         run: ./gradlew :core:test --no-daemon
 
