@@ -9,7 +9,7 @@ plugins {
 
 // The app is offline (see README.md): the merged manifest, libraries included, must never ask for the INTERNET permission.
 // Raise by one for every APK handed out; each split APK's own code is made from it in onVariants below.
-val VERSION_CODE = 1
+val VERSION_CODE = 2
 
 // The ABIs that get their own APK, with the digit each adds to the versionCode (see onVariants below).
 val ABI_CODES = mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86_64" to 3)
@@ -53,7 +53,7 @@ android {
         minSdk = 26
         targetSdk = 37
         versionCode = VERSION_CODE
-        versionName = "1.0.0"
+        versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
