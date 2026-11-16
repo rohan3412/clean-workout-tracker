@@ -1043,6 +1043,27 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
     var welcoming by mutableStateOf(false)
         private set
 
+    /** The running version's changes while the What's new pop-up is up (`WhatsNew.kt`, rule `whatsNewDue`); null otherwise. */
+    var whatsNew by mutableStateOf<clean.core.Release?>(null)
+        private set
+
+    /** Closes What's new; it does not come back until the next version (kv `whatsnew.seen`, the last version shown). */
+    fun closeWhatsNew() {
+        val r = whatsNew ?: return
+        whatsNew = null
+        setOption("whatsnew.seen", r.version)
+    }
+
+    /** Decided once at start-up, after the welcome: a first run records the version as seen so it never shows its own changes. */
+    private suspend fun decideWhatsNew() {
+        val app = getApplication<Application>()
+        val current = runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull() ?: return
+        val seen = dao.get("whatsnew.seen")
+        val releases = withContext(Dispatchers.IO) { readChanges(app) }
+        whatsNew = clean.core.whatsNewDue(releases, current, seen, firstRun = welcoming)
+        if (welcoming && seen == null) dao.put(Kv("whatsnew.seen", current))
+    }
+
     private suspend fun welcomeDue(id: Long) = showWelcome(dao.rowCount(id), dao.measurementCount(id), dao.get("welcome:$id") != null)
 
     /**
@@ -1072,6 +1093,7 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
             if (dao.measurementCount(id) > 0) measurements.first { it.isNotEmpty() }
             consistency.first { it != null }
             welcoming = welcomeDue(id)
+            decideWhatsNew()
             loaded = true
             firstPageDone.value = true
             // Only now, so that nothing competes with reading the data for the first page: the library's

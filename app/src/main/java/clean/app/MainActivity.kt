@@ -290,6 +290,8 @@ fun App(model: AppModel = viewModel()) {
         }
         return
     }
+    // Once after an update, over whatever page the app opened on.
+    model.whatsNew?.let { WhatsNewPopup(it) { model.closeWhatsNew() } }
     // Every chart can ask for the full screen through this.
     CompositionLocalProvider(LocalFullChart provides { chart -> model.fullChart = chart; model.open(Screen.Chart) }) {
     Box(Modifier.fillMaxSize()) {

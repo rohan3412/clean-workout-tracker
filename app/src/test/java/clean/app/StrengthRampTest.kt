@@ -2,6 +2,7 @@ package clean.app
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import clean.app.ui.theme.LIGHT_FULL
 import clean.app.ui.theme.LINEN_FULL
 import clean.app.ui.theme.meaning
 import clean.app.ui.theme.resolveLook
@@ -23,8 +24,16 @@ class StrengthRampTest {
     }
 
     @Test
+    fun `Light's full is near black past the orange ramp`() {
+        val look = resolveLook("light")
+        assertEquals(LIGHT_FULL, look.meaning().full)
+        val steps = listOf(look.meaning().full) + look.scale.reversed()
+        for (i in 1 until steps.size) assertTrue(steps[i].luminance() > steps[i - 1].luminance())
+        for (c in steps) assertTrue(c.red > c.green && c.green > c.blue)
+    }
+
+    @Test
     fun `other presets keep their full`() {
-        assertEquals(Color(0xFF7D6200), resolveLook("light").meaning().full)
         assertEquals(Color(0xFFF0C419), resolveLook("amoled").meaning().full)
         assertEquals(Color(0xFFF0C419), resolveLook("dark").meaning().full)
     }

@@ -113,6 +113,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -2115,7 +2117,10 @@ private fun Keypad(meta: PadMeta, rpe: String?, onKey: (String) -> Unit, onRpe: 
 /** The scale for how hard a set felt, as Strong has it: 6 to 10 in half steps. */
 private val RPE_VALUES = listOf("6", "6.5", "7", "7.5", "8", "8.5", "9", "9.5", "10")
 
-/** Full-screen chooser over the user's exercises and the library; a name that matches nothing can be created. */
+/**
+ * Chooser over the user's exercises and the library, a card in the middle of the screen with the workout dimmed behind it
+ * (the user's choice, 2026-11-16); a name that matches nothing can be created.
+ */
 @Composable
 fun ExercisePicker(model: AppModel, workouts: List<Workout>, onPick: (String) -> Unit, onDismiss: () -> Unit, onPickMany: ((List<String>) -> Unit)? = null) {
     val settings by model.settings.collectAsState()
@@ -2129,17 +2134,21 @@ fun ExercisePicker(model: AppModel, workouts: List<Workout>, onPick: (String) ->
     val drop = onDismiss
     Dialog(onDismissRequest = drop, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         BlinkWindow()
-        Surface(Modifier.fillMaxSize()) {
+        // Side and top and bottom margins leave the workout in view around the card; the keyboard pushes the card up.
+        Surface(
+            Modifier.fillMaxWidth().fillMaxHeight(0.86f).systemBarsPadding().imePadding().padding(horizontal = Space.l),
+            shape = cardShape(), color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
             Box(Modifier.fillMaxSize()) {
                 ExerciseList(
-                    all, musclesOf, onClick = onPick, modifier = Modifier.imePadding(), onCreate = onPick,
+                    all, musclesOf, onClick = onPick, onCreate = onPick,
                     leading = { IconButton(onClick = drop) { Icon(CleanIcons.Close, "Close") } },
                     favourites = settings.filterValues { it.favourite }.keys, hideLibrary = hide,
                     ticked = if (onPickMany != null) ticked else null, onTick = { if (!ticked.remove(it)) ticked.add(it) },
                 )
                 if (onPickMany != null && ticked.isNotEmpty()) MainButton(
                     "Add ${ticked.size}", { onPickMany(ticked.toList()) },
-                    Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(Space.l).fillMaxWidth(),
+                    Modifier.align(Alignment.BottomCenter).padding(Space.l).fillMaxWidth(),
                 )
             }
         }

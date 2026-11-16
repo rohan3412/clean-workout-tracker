@@ -38,6 +38,8 @@ val SETTINGS_INDEX = listOf(
     SettingPlace("Data", "Renamed exercises", "rename merge undo", "s-renamed"),
     SettingPlace("Data", "Tidy up", "notes variations", "s-tidy"),
     SettingPlace("Data", "Delete everything", "wipe erase reset all data", "s-delete"),
+    SettingPlace("Credits", "Source code", "github open source code repository mit", "s-source"),
+    SettingPlace("Credits", "What's new", "changes updates versions release notes", "s-changes"),
     SettingPlace("Credits", "Credits", "licence license MuscleMap exercises dataset fonts", "s-credits"),
     SettingPlace("Tips", "Tips", "gestures hidden hold swipe tap", "s-tips"),
 )

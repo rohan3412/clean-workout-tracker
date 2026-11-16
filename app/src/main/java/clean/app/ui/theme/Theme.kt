@@ -151,8 +151,13 @@ fun Look.meaning(): CleanColors {
     val set = if (negative) light.inverted(trueInvert) else if (this.dark) dark else light
     // Linen's Strength view: "Full" is one step deeper on its orange ramp, not the gold, so the five steps read as one ramp.
     if (preset == "linen" && scaleName == "orange" && !negative) return set.withFull(LINEN_FULL)
+    // Light's Strength view: "Full" is a near-black burnt orange past the ramp's top, in place of the olive (the user's pick, 2026-11-16).
+    if (preset == "light" && scaleName == "orange" && !negative) return set.withFull(LIGHT_FULL)
     return set
 }
+
+/** Light's strength at its full: near black on the orange ramp. */
+val LIGHT_FULL = Color(0xFF3A1404)
 
 /** Linen's strength at its full: the orange ramp's top step (`#B8430F`) taken one step deeper. */
 val LINEN_FULL = Color(0xFF8A300A)

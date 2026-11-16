@@ -288,7 +288,8 @@ fun SettingsScreen(model: AppModel) {
                 val found = searchSettings(query)
                 if (found.isEmpty()) item(key = "none") { Text("No setting matches “${query.trim()}”.", Modifier.padding(Space.l), color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 items(found, key = { it.key }) { place ->
-                    LinkRow(place.title, place.page, "") { jump = place.key; query = ""; openPage(place.page) }
+                    // Inset like the search box above; LinkRow has no side padding of its own (inside a card the card gives it).
+                    Box(Modifier.padding(horizontal = Space.l)) { LinkRow(place.title, place.page, "") { jump = place.key; query = ""; openPage(place.page) } }
                 }
             }
             if (page == null && query.isBlank()) {
@@ -732,6 +733,26 @@ fun SettingsScreen(model: AppModel) {
                     Toggle(model, "calendar.weeks", "Week totals in the calendar")
                 }
             }
+            if (page == "Credits") item(key = "s-source") {
+                Section("Source code") {
+                    Text("Clean is open source under the MIT License. The code is at $SOURCE_URL.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // Handed to the phone's browser; Clean itself still has no internet access. Without a browser the address is copied instead.
+                    TextButton(onClick = {
+                        try {
+                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(SOURCE_URL)))
+                        } catch (e: android.content.ActivityNotFoundException) {
+                            (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                                .setPrimaryClip(android.content.ClipData.newPlainText("Source code", SOURCE_URL))
+                            model.message = "No browser found. The address is copied."
+                        }
+                    }) { Text("Open in the browser") }
+                }
+            }
+            if (page == "Credits") item(key = "s-changes") {
+                // Every version; the pop-up after an update shows only the newest.
+                val releases = remember { readChanges(context) }
+                if (releases.isNotEmpty()) Section("What's new") { ChangeList(releases) }
+            }
             if (page == "Credits") item(key = "s-credits") {
                 Section("Credits") {
                     Text("The body figure is drawn from MuscleMap by Melih Colpan, used under the MIT License.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1081,11 +1102,14 @@ private val SETTINGS_PAGES = listOf(
     "Appearance" to "Presets, Mix and match, Day & night, Mono, Home, tab bar, charts, text size and font",
     "Lists" to "What the exercise list and the calendar show",
     "Data" to "Backup and restore, import and export, Health Connect, animations, renames, delete everything",
-    "Credits" to "Licences",
+    "Credits" to "Source code, what's new and licences",
     "Tips" to "Gestures that are not labelled",
 )
 
 /** The gestures nothing on screen points to, each checked against the code. */
+/** The public repository; opened in the browser from Settings, Credits. */
+const val SOURCE_URL = "https://github.com/rohan3412/clean-workout-tracker"
+
 private val TIPS = listOf(
     "Tap a set's Previous to copy last time's weight and reps into it.",
     "Tap the PR badge on a ticked set to see the best it beat.",
