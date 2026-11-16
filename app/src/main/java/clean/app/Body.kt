@@ -924,7 +924,7 @@ fun MeasurementDetailScreen(model: AppModel, fileName: String) {
                     val range = model.measurementRange()
                     val shown = if (range == 0L) points else points.filter { it.first >= LocalDate.now().minusDays(range) }
                     if (shown.size < 2) Text("Not enough entries in this period.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    else Box(Modifier.morphs("chart:weight")) { LineChart(shown, unit, goal = if (isWeight) weightGoal?.let { if (unit == "lb") it.targetKg / KG_PER_LB else it.targetKg } else null) }
+                    else LineChart(shown, unit, goal = if (isWeight) weightGoal?.let { if (unit == "lb") it.targetKg / KG_PER_LB else it.targetKg } else null, morph = "chart:weight")
                 }
                 else if (isWeight) EmptyPreview(
                     "Log ${2 - points.size} more ${if (points.isEmpty()) "weigh-ins" else "weigh-in"} to see your trend.", "Log weight", { model.logWeight() },

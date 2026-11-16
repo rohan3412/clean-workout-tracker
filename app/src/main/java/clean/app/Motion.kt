@@ -71,26 +71,30 @@ object Motion {
     // the card's own content fading out and the page's fading in, the corners and the outline, the tab bar leaving.
 
     /** A card growing into its page, and the page shrinking into its card; the look's speed does not touch it. */
-    const val CARD_TO_PAGE = 400
+    const val CARD_TO_PAGE = 500
     /** The share of [CARD_TO_PAGE] in which the card's own content is gone (opening) or comes back (going back); the page's takes the rest. */
     const val CARD_FADE_SHARE = 0.3f
     /** The share of the way the container has grown after which its outline fades; the outline is gone when it has the page's size. */
     const val OUTLINE_FADE_FROM = 0.75f
-    /** Material 3's emphasized decelerate, played backwards: Back retraces an opening frame for frame. */
-    val DecelerateReversed = CubicBezierEasing(0.9f, 0f, 0.95f, 0.3f)
+    /**
+     * Material 3's emphasized curve (the container transform's), the same both ways so opening and Back feel alike. Its path is two
+     * cubics, which are exactly the emphasized accelerate (to 1/6 of the time, 0.4 of the way) and then the emphasized decelerate.
+     */
+    val Emphasized = androidx.compose.animation.core.Easing { t ->
+        if (t < 1f / 6f) 0.4f * Accelerate.transform(t * 6f) else 0.4f + 0.6f * Decelerate.transform((t - 1f / 6f) * 1.2f)
+    }
 
-    /** The container's bounds, and everything that moves with them: emphasized decelerate opening, the same curve reversed going back. */
-    fun <T> cardBounds(forward: Boolean): TweenSpec<T> = tween(CARD_TO_PAGE, easing = if (forward) Decelerate else DecelerateReversed)
-    private const val CARD_FADE_MS = (CARD_TO_PAGE * CARD_FADE_SHARE).toInt()
-    /** Opening, the card's content is gone in the first [CARD_FADE_SHARE]; going back it returns in the last. */
-    fun cardContentOut(): TweenSpec<Float> = tween(CARD_FADE_MS, easing = Accelerate)
-    fun cardContentIn(): TweenSpec<Float> = tween(CARD_FADE_MS, delayMillis = CARD_TO_PAGE - CARD_FADE_MS, easing = Decelerate)
-    /** Opening, the page's content fades in over the rest; going back it fades out first, over the same span reversed. */
-    fun pageContentIn(): TweenSpec<Float> = tween(CARD_TO_PAGE - CARD_FADE_MS, delayMillis = CARD_FADE_MS, easing = Decelerate)
-    fun pageContentOut(): TweenSpec<Float> = tween(CARD_TO_PAGE - CARD_FADE_MS, easing = Accelerate)
+    /** The container's bounds, and everything that moves with them: Material 3's emphasized curve both ways. */
+    @Suppress("UNUSED_PARAMETER")
+    fun <T> cardBounds(forward: Boolean): TweenSpec<T> = tween(CARD_TO_PAGE, easing = Emphasized)
+    /** The card's content by how far the container has grown (0 the card, 1 the page): gone by [CARD_FADE_SHARE]. */
+    fun cardContentAlpha(grown: Float): Float = (1f - grown / CARD_FADE_SHARE).coerceIn(0f, 1f)
+    /** The page's content: in from [CARD_FADE_SHARE] to [PAGE_IN_BY], so Back takes it away first, the same way reversed. */
+    fun pageContentAlpha(grown: Float): Float = ((grown - CARD_FADE_SHARE) / (PAGE_IN_BY - CARD_FADE_SHARE)).coerceIn(0f, 1f)
+    const val PAGE_IN_BY = 0.8f
     /** What is on both the card and the page but not alike (a title, a number, a chart) crosses over while it travels. */
-    fun morphIn(): TweenSpec<Float> = tween(CARD_TO_PAGE / 2, delayMillis = CARD_TO_PAGE / 4, easing = LinearEasing)
-    fun morphOut(): TweenSpec<Float> = tween(CARD_TO_PAGE / 2, delayMillis = CARD_TO_PAGE / 4, easing = LinearEasing)
+    fun morphIn(): TweenSpec<Float> = tween(CARD_TO_PAGE / 2, delayMillis = CARD_TO_PAGE / 4, easing = Emphasized)
+    fun morphOut(): TweenSpec<Float> = tween(CARD_TO_PAGE / 2, delayMillis = CARD_TO_PAGE / 4, easing = Emphasized)
     /** The tabs page stays under the growing container until it is done (opening), and is there from the first frame going back. */
     fun <T> tabsHold(forward: Boolean): TweenSpec<T> = if (forward) tween(1, delayMillis = CARD_TO_PAGE) else tween(1)
 

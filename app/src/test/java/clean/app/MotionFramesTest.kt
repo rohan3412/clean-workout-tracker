@@ -218,7 +218,7 @@ class MotionFramesTest {
     /** What the container did in one change: the bounds it was drawn at in each frame it was drawn, and how far it had grown. */
     private class Trail(val rects: List<Rect>, val grown: List<Float>, val matched: Set<String>)
 
-    private fun trail(act: () -> Unit, frames: MutableList<Bitmap>, ms: Int = 480): Trail {
+    private fun trail(act: () -> Unit, frames: MutableList<Bitmap>, ms: Int = 640): Trail {
         compose.mainClock.autoAdvance = false
         compose.mainClock.advanceTimeBy(3000)
         frames += frame()
@@ -247,7 +247,7 @@ class MotionFramesTest {
      * moves, (b) grows steadily one way and shrinks steadily the other, (c) on Back lands on the card where it now sits on the tabs
      * page, (d) leaves nothing behind: the tabs page after Back is the one before the tap.
      */
-    private fun cardMorph(name: String, tab: Tab, key: String, preset: String? = null, shared: List<String> = listOf("title")) {
+    private fun cardMorph(name: String, tab: Tab, key: String, preset: String? = null, shared: List<String> = listOf("title"), chart: String? = null) {
         val scenario = launch(preset, lastFirst = true)
         compose.runOnIdle { model.tab = tab }
         compose.waitForIdle()
@@ -267,11 +267,15 @@ class MotionFramesTest {
         // A title that is the same words on card and page is one text that moves: it found its match on the way there and on the way back.
         // What is on both the card and the page found its match, so it is one moving box (a label into the title, a number into the number).
         for (role in shared) assertTrue("$name open: $role never matched; matched ${open.matched}", "$key/$role" in open.matched)
+        // A chart on both is one line that travels and reshapes, drawn over both, not two charts crossing over.
+        if (chart != null) assertTrue("$name open: the chart line did not travel; drew ${MorphProbe.chartsDrawn}", "$key/$chart" in MorphProbe.chartsDrawn)
+        MorphProbe.chartsDrawn.clear()
         val backFrames = mutableListOf<Bitmap>()
         val back = trail({ model.back() }, backFrames)
         for (role in shared) assertTrue("$name back: $role never matched; matched ${back.matched}", "$key/$role" in back.matched)
         saveStrip("$name-back-$tag", pick(backFrames, 3, 11), 6)
         saveStrip("$name-back-$tag-fine", backFrames.subList(0, 12), 6)
+        if (chart != null) assertTrue("$name back: the chart line did not travel; drew ${MorphProbe.chartsDrawn}", "$key/$chart" in MorphProbe.chartsDrawn)
         assertTrue("$name back: the container was drawn in only ${back.rects.size} frames", back.rects.size >= 8)
         assertTrue("$name back: it does not shrink steadily ${back.grown}", back.grown.zipWithNext().all { (a, b) -> b <= a + 0.001f })
         assertTrue("$name back: it starts at ${back.grown.first()}", back.grown.first() > 0.4f)
@@ -305,8 +309,8 @@ class MotionFramesTest {
     @Test fun progressActivityCard() = cardMorph("activity", Tab.Progress, "progress:activity")
     @Test fun homeWideCard() = cardMorph("home-wide", Tab.Home, "home:last")
     @Test fun homeHalfTile() = cardMorph("home-tile", Tab.Home, "home:streak", shared = listOf("title", "number"))
-    @Test fun homeChartTile() = cardMorph("home-chart", Tab.Home, "home:volume")
-    @Test fun homeChartTileLinen() = cardMorph("home-chart", Tab.Home, "home:volume", "linen")
+    @Test fun homeChartTile() = cardMorph("home-chart", Tab.Home, "home:volume", chart = "chart:Volume a week")
+    @Test fun homeChartTileLinen() = cardMorph("home-chart", Tab.Home, "home:volume", "linen", chart = "chart:Volume a week")
     @Test fun profileCard() = cardMorph("profile-tile", Tab.Profile, "profile:membersince")
     @Test fun progressBodyCardLinen() = cardMorph("body", Tab.Progress, "progress:body", "linen", listOf("title", "figure"))
     @Test fun progressHistoryCardLinen() = cardMorph("history", Tab.Progress, "progress:history", "linen")

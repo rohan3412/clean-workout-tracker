@@ -246,7 +246,9 @@ fun Caption(text: String, modifier: Modifier = Modifier, align: TextAlign? = nul
 @Composable
 fun drawnIn(): State<Float> {
     val motion = LocalMotion.current
-    val drawn = remember { Animatable(if (motion) 0f else 1f) }
+    // A page growing out of a card is already drawn: what is only on the page fades in where it rests, nothing draws itself in.
+    val growing = LocalPageCard.current != null
+    val drawn = remember { Animatable(if (motion && !growing) 0f else 1f) }
     LaunchedEffect(Unit) { drawn.animateTo(1f, Motion.slow()) }
     return drawn.asState()
 }

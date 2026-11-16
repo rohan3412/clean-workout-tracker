@@ -821,7 +821,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                     Section("Notes") { for ((date, text) in notes.take(40)) LinkRow(text, prettyDay(date), "") { model.open(Screen.WorkoutDetail(date)) } }
                 }
             }
-            if (tab == CHARTS) item { Box(Modifier.morphs("chart:1rm")) {
+            if (tab == CHARTS) item { Box {
                 // Each chart is one value per session; only the ones this kind of exercise has are offered.
                 val charts: List<Triple<String, String, (Progress) -> Double?>> = when (loadType) {
                     LoadType.TIMED -> listOf(
@@ -865,11 +865,12 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                             ChartSeries(label, lineUnit, series[i % series.size], chartPoints(sideProgress, from, measure))
                         }.filter { it.points.size >= 2 }
                         if (lines.isEmpty()) Text("Not enough sessions in this period to draw a line.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        else MultiLineChart(lines, name)
+                        else MultiLineChart(lines, name, morph = "chart:1rm", morphLabel = "Est. 1RM")
                     } else if (points.size < 2) Text("Not enough sessions in this period to draw a line.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     else SplitLineChart(
                         points, chartUnit, trend = true, title = "$name · ${charts[chart.coerceIn(charts.indices)].first}",
                         goal = goalLine(charts[chart.coerceIn(charts.indices)].first), onTap = openDay,
+                        morph = if (charts[chart.coerceIn(charts.indices)].first == "Est. 1RM") "chart:1rm" else null,
                     )
                   }
                 }

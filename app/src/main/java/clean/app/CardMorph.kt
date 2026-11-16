@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Density
@@ -123,6 +124,8 @@ internal object MorphProbe {
     @Volatile var clip: MorphClip? = null
     /** Every shared thing by its full key, to ask whether it found its match (a title found once is one text that moves, not two). */
     val states = java.util.concurrent.ConcurrentHashMap<String, SharedTransitionScope.SharedContentState>()
+    /** Every chart line drawn travelling between a card and its page, by `<card>/<role>`. */
+    val chartsDrawn: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 }
 
 /**
@@ -149,6 +152,8 @@ class MorphClip : SharedTransitionScope.OverlayClip {
     init { MorphProbe.clip = this }
 
     fun begin(spot: CardSpot, pageSize: Size) { from = spot; page = pageSize }
+    /** The card's bounds in the window, where the container starts (and, going back, ends). */
+    val start: Rect? get() = from?.rect
     val outline: BorderStroke? get() = from?.border
     /** The colour the container starts in: the card's fill over the page, going to the page's own as it grows. */
     val fill: androidx.compose.ui.graphics.Color? get() = from?.fill
@@ -213,16 +218,20 @@ fun Modifier.opensInto(border: BorderStroke?, fill: androidx.compose.ui.graphics
     // Only the card being opened fades (out in the first part of the clock, back in the last); the others stay as they are. The fade is
     // always set up, so it is there on the frame the card is tapped.
     val mine = LocalMorphCard.current == key
-    val fade by scope.transition.animateFloat({ if (!mine) snap() else if (targetState == EnterExitState.Visible) Motion.cardContentIn() else Motion.cardContentOut() }, label = "card content") {
-        if (it == EnterExitState.Visible) 1f else 0f
-    }
+    val progress = LocalBarOut.current
     return with(shared) {
         noted.sharedBounds(
             rememberSharedContentState("card:$key", MorphConfig(morphingNow)), scope, androidx.compose.animation.EnterTransition.None, androidx.compose.animation.ExitTransition.None,
             { _, _ -> Motion.cardBounds(forward()) }, resizeMode = UNSCALED, clipInOverlayDuringTransition = clip,
             // Above the growing container, so its content is seen fading out and not hidden at once.
             zIndexInOverlay = 1f,
-        ).graphicsLayer { alpha = if (mine) fade else 1f }
+        ).graphicsLayer {
+            // How far the container has gone from the card (0) to the page (1), on the container's own clock: the card's content fades on
+            // it and stays where it rests on the card while the container moves away (the container draws it at its own corner).
+            val q = if (mine && shared.isTransitionActive) progress?.value ?: 0f else 0f
+            alpha = Motion.cardContentAlpha(q)
+            clip.start?.let { translationX = it.left * q; translationY = it.top * q }
+        }
     }
 }
 
@@ -251,16 +260,19 @@ fun Modifier.cardTarget(key: String?, morphing: Boolean): Modifier {
     val background = MaterialTheme.colorScheme.background
     // The floor starts in the card's own fill and goes to the page's as the container grows.
     val floor = if (shared.isTransitionActive) Modifier.drawBehind { drawRect(clip.fill?.let { androidx.compose.ui.graphics.lerp(it, background, clip.grown) } ?: background) } else Modifier
-    val content by page.transition.animateFloat({ if (!morphing) snap() else if (targetState == EnterExitState.Visible) Motion.pageContentIn() else Motion.pageContentOut() }, label = "page content") {
-        if (it == EnterExitState.Visible) 1f else 0f
-    }
+    val progress = LocalBarOut.current
     // The floor goes after the shared bounds, so it is part of the growing container and clipped to it, not a full-screen sheet over the tabs.
     // The container is solid from the first frame; only the page's content fades in over the floor.
     return with(shared) {
         sharedBounds(
             rememberSharedContentState("card:$key", MorphConfig(morphingNow)), page, androidx.compose.animation.EnterTransition.None, androidx.compose.animation.ExitTransition.None,
             { _, _ -> Motion.cardBounds(forward()) }, resizeMode = UNSCALED, clipInOverlayDuringTransition = clip, zIndexInOverlay = 0.5f,
-        ).then(floor).graphicsLayer { alpha = content }
+        ).then(floor).graphicsLayer {
+            // The page's own content fades in where it rests on the page, not riding in from the container's top corner.
+            val q = if (morphing && shared.isTransitionActive) progress?.value ?: 1f else 1f
+            alpha = Motion.pageContentAlpha(q)
+            clip.start?.let { translationX = -it.left * (1f - q); translationY = -it.top * (1f - q) }
+        }
     }
 }
 
@@ -380,7 +392,8 @@ fun MorphText(
         if (cardSide) (if (it == EnterExitState.Visible) 0f else 1f) else (if (it == EnterExitState.Visible) 1f else 0f)
     }
     val mineAlpha = { if (cardSide) 1f - toPage else toPage }
-    Box(modifier.morphs(role, same = true, clipped = false), contentAlignment = androidx.compose.ui.Alignment.CenterStart) {
+    // Clipped to the container like the rest: the words keep their size while the box resizes, so longer words would stick out of it.
+    Box(modifier.morphs(role, same = true), contentAlignment = androidx.compose.ui.Alignment.CenterStart) {
         androidx.compose.material3.Text(
             // While it travels the box is any size, and the words keep theirs; at rest they fit (or shrink) in the room they have.
             text, (if (morphingNow()) Modifier.wrapContentWidth(androidx.compose.ui.Alignment.Start, unbounded = true) else Modifier).graphicsLayer {
@@ -404,3 +417,95 @@ fun MorphText(
     text: String, role: String, modifier: Modifier = Modifier, onPage: Boolean = false, fontWeight: androidx.compose.ui.text.font.FontWeight? = null,
     maxLines: Int = Int.MAX_VALUE, overflow: androidx.compose.ui.text.style.TextOverflow = androidx.compose.ui.text.style.TextOverflow.Clip,
 ) = MorphText(androidx.compose.ui.text.AnnotatedString(text), role, modifier, onPage, fontWeight = fontWeight, maxLines = maxLines, overflow = overflow)
+
+/** One side of a chart that morphs: its line as points in the window (x0, y0, x1, y1, ...), resampled to [CHART_SAMPLES], and how it is drawn. */
+class ChartLine(val points: FloatArray, val color: androidx.compose.ui.graphics.Color, val width: Float, val dot: androidx.compose.ui.graphics.Color?, val dotRadius: Float)
+
+/** The charts' lines by `<card>/<role>/card|page`. */
+val LocalChartLines = staticCompositionLocalOf<androidx.compose.runtime.snapshots.SnapshotStateMap<String, ChartLine>?> { null }
+
+const val CHART_SAMPLES = 48
+
+/** The line through [xs], [ys] (left to right) at [n] evenly spaced x, offset by [origin]. */
+internal fun resampleLine(xs: FloatArray, ys: FloatArray, origin: androidx.compose.ui.geometry.Offset, n: Int = CHART_SAMPLES): FloatArray {
+    val out = FloatArray(n * 2)
+    var k = 0
+    for (i in 0 until n) {
+        val x = xs.first() + (xs.last() - xs.first()) * i / (n - 1)
+        while (k < xs.size - 2 && xs[k + 1] < x) k++
+        val dx = xs[k + 1] - xs[k]
+        val f = if (dx <= 0f) 1f else ((x - xs[k]) / dx).coerceIn(0f, 1f)
+        out[2 * i] = origin.x + x
+        out[2 * i + 1] = origin.y + ys[k] + (ys[k + 1] - ys[k]) * f
+    }
+    return out
+}
+
+/** A chart's half of the one line that travels between card and page: [modifier] notes where its line is, [hidden] says when the travelling line stands in for it. */
+class ChartMorphSide(val hidden: () -> Boolean, val modifier: Modifier)
+
+/**
+ * Makes the line of a chart on a card and the line of the chart on its page (the same [role]) one line while the card opens or closes:
+ * both real lines step aside and [ChartMorphLine] draws a line that moves and reshapes from the one to the other, point by point.
+ * [line] gives the line's points for the chart's size, in the chart's own px. With no pair, or animations off, nothing changes.
+ */
+@Composable
+fun rememberChartMorph(
+    role: String?, color: androidx.compose.ui.graphics.Color, width: Float, dot: androidx.compose.ui.graphics.Color? = null, dotRadius: Float = 0f,
+    line: (Size) -> Pair<FloatArray, FloatArray>?,
+): ChartMorphSide {
+    val cardKey = LocalCardKey.current
+    val key = cardKey ?: LocalPageCard.current
+    val lines = LocalChartLines.current
+    if (role == null || key == null || lines == null || !LocalMotion.current) return ChartMorphSide({ false }, Modifier)
+    val here = "$key/$role/" + if (cardKey != null) "card" else "page"
+    val there = "$key/$role/" + if (cardKey != null) "page" else "card"
+    val morphingNow = LocalMorphing.current
+    val mine = LocalMorphCard.current == key
+    val current = androidx.compose.runtime.rememberUpdatedState(line)
+    DisposableEffect(here) { onDispose { lines.remove(here) } }
+    return ChartMorphSide(
+        { mine && morphingNow() && lines[here] != null && lines[there] != null },
+        Modifier.onGloballyPositioned { c ->
+            val (xs, ys) = current.value(Size(c.size.width.toFloat(), c.size.height.toFloat())) ?: return@onGloballyPositioned run { lines.remove(here); Unit }
+            if (xs.size < 2) { lines.remove(here); return@onGloballyPositioned }
+            lines[here] = ChartLine(resampleLine(xs, ys, c.positionInRoot()), color, width, dot, dotRadius)
+        },
+    )
+}
+
+/** The one line of a chart on both the card and its page, drawn over both while the card [card] opens or closes ([rememberChartMorph]). */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun ChartMorphLine(card: String) {
+    val shared = LocalSharedScope.current ?: return
+    val lines = LocalChartLines.current ?: return
+    val progress = LocalBarOut.current ?: return
+    val morphingNow = LocalMorphing.current
+    with(shared) {
+        Box(
+            Modifier.fillMaxSize()
+                .renderInSharedTransitionScopeOverlay(zIndexInOverlay = 2.5f) { shared.isTransitionActive }
+                .drawWithContent {
+                    if (!morphingNow()) return@drawWithContent
+                    val q = progress.value
+                    for ((name, from) in lines) {
+                        if (!name.startsWith("$card/") || !name.endsWith("/card")) continue
+                        val to = lines[name.removeSuffix("/card") + "/page"] ?: continue
+                        MorphProbe.chartsDrawn += name.removeSuffix("/card")
+                        val n = minOf(from.points.size, to.points.size) / 2
+                        val xs = FloatArray(n) { from.points[2 * it] + (to.points[2 * it] - from.points[2 * it]) * q }
+                        val ys = FloatArray(n) { from.points[2 * it + 1] + (to.points[2 * it + 1] - from.points[2 * it + 1]) * q }
+                        val path = Path().apply { curveThrough(xs, ys) }
+                        val color = androidx.compose.ui.graphics.lerp(from.color, to.color, q)
+                        drawPath(path, color, style = Stroke(from.width + (to.width - from.width) * q, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                        val dot = to.dot ?: from.dot
+                        if (dot != null) {
+                            val r = (if (from.dot != null) from.dotRadius else 0f) * (1f - q) + (if (to.dot != null) to.dotRadius else 0f) * q
+                            if (r > 0f) drawCircle(dot, r, androidx.compose.ui.geometry.Offset(xs.last(), ys.last()))
+                        }
+                    }
+                },
+        )
+    }
+}

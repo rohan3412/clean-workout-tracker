@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -33,7 +34,11 @@ fun TrendsScreen(model: AppModel) {
     var range by model.remembered("trendRange", "365")
     val days = range.toLongOrNull() ?: 365L
     Scaffold(containerColor = pageContainer(), topBar = { BackBar("Trends", model::back) }) { padding ->
-        LazyColumn(Modifier.padding(padding).fillMaxSize()) {
+        // Opened by a tile with a chart (Volume), the page starts at that chart, so the tile's line has its own to travel to.
+        val from = LocalPageCard.current
+        val lines = LocalChartLines.current
+        val focus = remember { TREND_TITLES.indexOfFirst { lines?.containsKey("$from/chart:$it/card") == true } }
+        LazyColumn(Modifier.padding(padding).fillMaxSize(), rememberLazyListState(initialFirstVisibleItemIndex = if (focus > 0) focus + 1 else 0)) {
             item {
                 Section("") {
                     RangeChoice(listOf(90L, 365L, 0L), days, { if (it == 90L) "3M" else if (it == 365L) "1Y" else "All" }) { range = it.toString() }
@@ -49,11 +54,11 @@ fun TrendsScreen(model: AppModel) {
                 Triple("Working sets a week", "sets", shown.map { it.monday to it.sets.toDouble() }),
             )
             for ((title, unit, points) in charts) item(key = title) {
-                Section(title, Modifier.morphs("chart:$title")) {
+                Section(title) {
                     if (weeks.size < 3) EmptyPreview("Log ${3 - weeks.size} more ${if (weeks.size == 2) "week" else "weeks"} of workouts to see this.") { PreviewSamples.Line() }
                     else if (points.size < 3) Text("Not enough weeks in this period to draw a line.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     else {
-                        LineChart(points, unit, trend = true, title = title, onTap = openWeek)
+                        LineChart(points, unit, trend = true, title = title, onTap = openWeek, morph = "chart:$title")
                         // The plain average, and the last four weeks against it.
                         val average = points.map { it.second }.average()
                         val recent = points.takeLast(4).map { it.second }.average()
@@ -66,3 +71,6 @@ fun TrendsScreen(model: AppModel) {
         }
     }
 }
+
+/** The four charts of Trends, in order (each one's item comes after the range choice). */
+private val TREND_TITLES = listOf("Workouts a week", "Hours a week", "Volume a week", "Working sets a week")

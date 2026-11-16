@@ -408,7 +408,7 @@ internal fun BodyWeightCard(model: AppModel) {
     val inUnit = shown.map { it.first to (if (unit == "lb") it.second / clean.core.KG_PER_LB else it.second) }
     val line = inUnit.groupBy { weekStart(it.first) }.toSortedMap().values.map { w -> w.sumOf { it.second } / w.size }
     val edge = LocalEdgeCharts.current && line.size >= 2
-    val bleed: (@Composable ColumnScope.() -> Unit)? = if (edge) ({ Sparkline(line, Modifier.morphsFromCard("chart:weight"), edge = true, height = 96.dp) }) else null
+    val bleed: (@Composable ColumnScope.() -> Unit)? = if (edge) ({ Sparkline(line, edge = true, height = 96.dp, morph = "chart:weight") }) else null
     Section("Body weight", onClick = { model.open(Screen.MeasurementDetail("weight.csv")) }, bleed = bleed) {
         when {
             weights.size < 2 -> EmptyPreview(
@@ -426,7 +426,7 @@ internal fun BodyWeightCard(model: AppModel) {
                     )
                 }
             }
-            else -> Box(Modifier.morphsFromCard("chart:weight")) { LineChart(inUnit, unit) }
+            else -> LineChart(inUnit, unit, morph = "chart:weight")
         }
     }
 }
@@ -481,12 +481,12 @@ internal fun Tile(
             Row(Modifier.padding(start = Space.l, top = Space.l, end = Space.l, bottom = if (edge) Space.s else Space.l), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xxs)) {
                     Caption(label, role = "title")
-                    Row(Modifier.then(if (spark != null && spark.size >= 2 || link == null) Modifier else Modifier.morphsFromCard(link)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                         FitValue(value, MaterialTheme.typography.headlineMedium.numbers(), if (tap != null) valueRole else null)
                         if (icon != null) Icon(icon, "Shield held", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                     }
                     if (second != null) Text(second, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (spark != null && spark.size >= 2 && !edge) Sparkline(spark, Modifier.padding(top = Space.s).then(if (link != null) Modifier.morphsFromCard(link) else Modifier))
+                    if (spark != null && spark.size >= 2 && !edge) Sparkline(spark, Modifier.padding(top = Space.s), morph = link)
                     // Too little to draw yet: a faint sample line says what will appear (see EmptyPreview).
                     else if (sample && (spark == null || spark.size < 2)) {
                         Box(Modifier.graphicsLayer { alpha = 0.3f }.clearAndSetSemantics { }) { Sparkline(PreviewSamples.LINE.map { it.toDouble() }, Modifier.padding(top = Space.s)) }
@@ -503,7 +503,7 @@ internal fun Tile(
             // Edge to edge: the line runs along the card's bottom, left to right, with the card's corners clipping it; in a taller card it sits at the bottom.
             if (edge && spark != null) {
                 Spacer(Modifier.weight(1f))
-                Sparkline(spark, if (link != null) Modifier.morphsFromCard(link) else Modifier, edge = true)
+                Sparkline(spark, edge = true, morph = link)
             }
         }
     }
@@ -551,24 +551,28 @@ internal fun withUnit(text: String, muted: Color): androidx.compose.ui.text.Anno
  * edge it runs from side to side above a faint fill to the bottom, and keeps clear of the bottom so the card's corners do not cut it.
  */
 @Composable
-internal fun Sparkline(values: List<Double>, modifier: Modifier = Modifier, edge: Boolean = false, height: Dp = if (edge) 44.dp else 28.dp) {
+internal fun Sparkline(values: List<Double>, modifier: Modifier = Modifier, edge: Boolean = false, height: Dp = if (edge) 44.dp else 28.dp, morph: String? = null) {
     val look = LocalLook.current
     // Linen: a thin dark line over a grey wash that fades to nothing, and the last point an orange dot.
     val fade = look.chartFade
     val color = if (fade) (look.chartLine ?: look.orange) else MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
     val dot = look.orange
-    Spacer(modifier.fillMaxWidth().height(height).drawWithCache {
-        val pad = 2.dp.toPx()
-        val padX = if (edge) 0f else pad
-        // The last point, Linen's orange dot, stops short of the right edge so the whole dot shows inside the card.
-        val padRight = if (fade) 10.dp.toPx() else padX
-        val top = if (edge) 4.dp.toPx() else pad
-        val bottom = if (edge) 10.dp.toPx() else pad
-        val low = values.min()
-        val span = (values.max() - low).takeIf { it > 0 }
-        val xs = FloatArray(values.size) { padX + it.toFloat() / (values.size - 1) * (size.width - padX - padRight) }
+    val density = LocalDensity.current
+    val pad = with(density) { 2.dp.toPx() }
+    val padX = if (edge) 0f else pad
+    // The last point, Linen's orange dot, stops short of the right edge so the whole dot shows inside the card.
+    val padRight = if (fade) with(density) { 10.dp.toPx() } else padX
+    val top = if (edge) with(density) { 4.dp.toPx() } else pad
+    val bottom = if (edge) with(density) { 10.dp.toPx() } else pad
+    val low = values.min()
+    val span = (values.max() - low).takeIf { it > 0 }
+    fun line(size: Size): Pair<FloatArray, FloatArray> = FloatArray(values.size) { padX + it.toFloat() / (values.size - 1) * (size.width - padX - padRight) } to
         // A level line runs along the middle.
-        val ys = FloatArray(values.size) { if (span == null) size.height / 2 else top + (1 - ((values[it] - low) / span).toFloat()) * (size.height - top - bottom) }
+        FloatArray(values.size) { if (span == null) size.height / 2 else top + (1 - ((values[it] - low) / span).toFloat()) * (size.height - top - bottom) }
+    val lineWidth = with(density) { if (fade) look.chartLineWidth.dp.toPx() else 2.dp.toPx() }
+    val travel = rememberChartMorph(morph, color, lineWidth, if (fade) dot else null, with(density) { 3.dp.toPx() }) { line(it) }
+    Spacer(modifier.fillMaxWidth().height(height).then(travel.modifier).drawWithCache {
+        val (xs, ys) = line(size)
         val path = Path()
         path.curveThrough(xs, ys)
         val fill = if (edge) Path().apply { addPath(path); lineTo(xs.last(), size.height); lineTo(0f, size.height); close() }
@@ -593,8 +597,11 @@ internal fun Sparkline(values: List<Double>, modifier: Modifier = Modifier, edge
                 drawRect(sideFade!!, blendMode = androidx.compose.ui.graphics.BlendMode.DstIn)
                 drawContext.canvas.restore()
             } else fill?.let { drawPath(it, color.copy(alpha = 0.12f)) }
-            drawPath(path, color, style = stroke)
-            if (fade) drawCircle(dot, 3.dp.toPx(), Offset(xs.last(), ys.last()))
+            // While the card opens or closes, the one line that travels to the page's chart stands in for this one.
+            if (!travel.hidden()) {
+                drawPath(path, color, style = stroke)
+                if (fade) drawCircle(dot, 3.dp.toPx(), Offset(xs.last(), ys.last()))
+            }
         }
     })
 }
@@ -714,10 +721,11 @@ fun LineChart(
     height: Dp = 190.dp,
     trend: Boolean = false,
     goal: Double? = null,
+    morph: String? = null,
     onTap: ((LocalDate) -> Unit)? = null,
 ) {
     val plain = remember(points) { points.map { ChartPoint(it.first, it.second) } }
-    SplitLineChart(plain, unit, range, bands, title, height, trend, goal, onTap = onTap)
+    SplitLineChart(plain, unit, range, bands, title, height, trend, goal, onTap = onTap, morph = morph)
 }
 
 /**
@@ -742,6 +750,8 @@ fun SplitLineChart(
     trend: Boolean = false,
     goal: Double? = null,
     imbalance: Boolean = false,
+    /** The role of the line that travels from a card to this chart on its page ([rememberChartMorph]); only a plain line travels. */
+    morph: String? = null,
     onTap: ((LocalDate) -> Unit)? = null,
 ) {
     val look = LocalLook.current
@@ -802,6 +812,19 @@ fun SplitLineChart(
     }
     val drawn by drawnIn()
     val textScale = LocalTextScale.current
+    val density = LocalDensity.current
+    // The plain line (no bars, sides or imbalance) is the one that can travel from a card: its points as drawn below.
+    val travel = rememberChartMorph(
+        if (bars || hasSplit || imbalance) null else morph, line, with(density) { (if (fade) look.chartLineWidth else 2.5f).dp.toPx() },
+        if (fade) dotColor else null, with(density) { 4.5.dp.toPx() },
+    ) { size ->
+        val left = with(density) { 46.dp.toPx() }
+        val top = with(density) { 10.dp.toPx() }
+        val bottom = size.height - top
+        val span = (high - low).takeIf { it > 0 } ?: 1.0
+        FloatArray(shown.size) { left + ChronoUnit.DAYS.between(first, shown[it].date).toFloat() / days * (size.width - left) } to
+            FloatArray(shown.size) { top + ((high - shown[it].value) / span).toFloat() * (bottom - top) }
+    }
     val splits = points.count { it.split }
     val lastPoint = points.last()
     val summary = when {
@@ -810,7 +833,7 @@ fun SplitLineChart(
             ", from ${shortNumber(points.minOf { it.low })} to ${shortNumber(points.maxOf { it.high })} $unit, " +
             (if (lastPoint.split) "latest left ${shortNumber(lastPoint.left!!)}, right ${shortNumber(lastPoint.right!!)}" else "latest ${shortNumber(latest)}")
     }.replace(" ,", ",")
-    Spacer(Modifier.fillMaxWidth().height(height).semantics { contentDescription = summary; role = Role.Image }.pointerInput(points) {
+    Spacer(Modifier.fillMaxWidth().height(height).then(travel.modifier).semantics { contentDescription = summary; role = Role.Image }.pointerInput(points) {
         detectTapGestures { at ->
             val left = 46.dp.toPx()
             val day = first.plusDays(Math.round((at.x - left) / (size.width - left) * days).toLong())
@@ -880,8 +903,11 @@ fun SplitLineChart(
                 else if (marks != null) drawSplitMarks(marks, line, linesOnly = smoothed)
                 else {
                     fadeFill?.let { drawPath(it, fadeBrush!!) }
-                    drawPath(path, line, style = stroke)
-                    if (fade && !imbalance) { drawCircle(halo, 6.5.dp.toPx(), lastAt); drawCircle(dotColor, 4.5.dp.toPx(), lastAt) }
+                    // While a card opens into this page, the line travelling from the card's chart stands in for this one.
+                    if (!travel.hidden()) {
+                        drawPath(path, line, style = stroke)
+                        if (fade && !imbalance) { drawCircle(halo, 6.5.dp.toPx(), lastAt); drawCircle(dotColor, 4.5.dp.toPx(), lastAt) }
+                    }
                 }
             }
         }
@@ -1126,7 +1152,7 @@ private fun latestSpoken(p: ChartPoint) = if (p.split) "left ${shortNumber(p.lef
  * of a muscle's sets) and keep one scale, so the gap between the lines is the gap in the numbers.
  */
 @Composable
-fun MultiLineChart(series: List<ChartSeries>, title: String = "", height: Dp = 190.dp, shared: Boolean = false) {
+fun MultiLineChart(series: List<ChartSeries>, title: String = "", height: Dp = 190.dp, shared: Boolean = false, morph: String? = null, morphLabel: String? = null) {
     val grid = MaterialTheme.colorScheme.outlineVariant
     val accent = MaterialTheme.colorScheme.primary
     val look = LocalLook.current
@@ -1137,7 +1163,24 @@ fun MultiLineChart(series: List<ChartSeries>, title: String = "", height: Dp = 1
     val drawn by drawnIn()
     // Several lines on their own scales cannot be bars side by side and stay readable, so Bars draws "All" as lines; Smoothed averages each line.
     val smoothed = LocalChartStyle.current == ChartStyle.SMOOTH
-    Spacer(Modifier.fillMaxWidth().height(height).semantics { contentDescription = "${title.ifEmpty { "Chart" }}:${series.joinToString(", ") { "${it.label}, latest ${latestSpoken(it.points.last())} ${it.unit}".trim() + (if (it.points.any { p -> p.split }) ", ${it.points.count { p -> p.split }} sessions left and right, left solid line, right dashed line" else "") }}"; role = Role.Image }.drawWithCache {
+    // The line named [morphLabel], when plain, is the one that travels from a card ([rememberChartMorph]).
+    val density = LocalDensity.current
+    val travelling = series.indexOfFirst { it.label == morphLabel }.takeIf { it >= 0 && series[it].points.none { p -> p.split } }
+    val travel = rememberChartMorph(
+        if (travelling == null) null else morph, if (single) look.chartLine ?: accent else travelling?.let { series[it].color } ?: accent,
+        with(density) { (if (single) look.chartLineWidth else 2.5f).dp.toPx() },
+    ) { size ->
+        val line = series[travelling!!]
+        val scale = if (shared) series else listOf(line)
+        val top = with(density) { 10.dp.toPx() }
+        val bottom = size.height - top
+        val low = scale.minOf { s -> s.points.minOf { it.low } }
+        val span = (scale.maxOf { s -> s.points.maxOf { it.high } } - low).takeIf { it > 0 } ?: 1.0
+        val shown = if (smoothed) smoothedPoints(line.points) else line.points
+        FloatArray(shown.size) { ChronoUnit.DAYS.between(first, shown[it].date).toFloat() / days * size.width } to
+            FloatArray(shown.size) { bottom - ((shown[it].value - low) / span).toFloat() * (bottom - top) }
+    }
+    Spacer(Modifier.fillMaxWidth().height(height).then(travel.modifier).semantics { contentDescription = "${title.ifEmpty { "Chart" }}:${series.joinToString(", ") { "${it.label}, latest ${latestSpoken(it.points.last())} ${it.unit}".trim() + (if (it.points.any { p -> p.split }) ", ${it.points.count { p -> p.split }} sessions left and right, left solid line, right dashed line" else "") }}"; role = Role.Image }.drawWithCache {
         // Each line is worked out once for this size, not on each frame of its drawing-in.
         val top = 10.dp.toPx()
         val bottom = size.height - 10.dp.toPx()
@@ -1169,12 +1212,14 @@ fun MultiLineChart(series: List<ChartSeries>, title: String = "", height: Dp = 1
             drawLine(grid, Offset(0f, bottom), Offset(size.width, bottom))
             if (single) for (k in 1..2) drawLine(grid, Offset(0f, top + (bottom - top) * k / 3f), Offset(size.width, top + (bottom - top) * k / 3f))
             clipRect(right = size.width * drawn) {
-                for ((path, color, marks, raw) in paths) {
+                for ((i, drawnLine) in paths.withIndex()) {
+                    val (path, color, marks, raw) = drawnLine
                     raw?.let { drawRawDots(it, color) }
                     if (marks != null) drawSplitMarks(marks, color, linesOnly = smoothed)
                     else {
                         if (wash != null && washBrush != null) drawPath(wash, washBrush)
-                        drawPath(path, color, style = stroke)
+                        // The line travelling from a card stands in for this one while the card opens or closes.
+                        if (i != travelling || !travel.hidden()) drawPath(path, color, style = stroke)
                     }
                 }
             }

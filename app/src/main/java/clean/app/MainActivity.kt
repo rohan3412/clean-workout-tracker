@@ -309,6 +309,7 @@ fun App(model: AppModel = viewModel()) {
     val cards = remember { CardBounds() }
     val clip = remember { MorphClip() }
     val morphTexts = remember { androidx.compose.runtime.mutableStateMapOf<String, MorphTextSpec>() }
+    val chartLines = remember { androidx.compose.runtime.mutableStateMapOf<String, ChartLine>() }
     val window = LocalWindowInfo.current.containerSize
     // A page keeps where it was scrolled to (and what else it remembers) while it is under others, so Back returns
     // to the same spot; what it kept is dropped once it has left the stack.
@@ -347,7 +348,7 @@ fun App(model: AppModel = viewModel()) {
     }, "tabs alpha") { if (it) 1f else 0f }
     val barOut = tabsMove.animateFloat({ if (!motion || card == null) snap() else Motion.cardBounds(!targetState) }, "bar") { if (it) 0f else 1f }
     CompositionLocalProvider(
-        LocalSharedScope provides shared, LocalMorphClip provides clip, LocalMorphCard provides card, LocalCardBounds provides cards, LocalMorphTexts provides morphTexts, LocalBarOut provides barOut,
+        LocalSharedScope provides shared, LocalMorphClip provides clip, LocalMorphCard provides card, LocalCardBounds provides cards, LocalMorphTexts provides morphTexts, LocalChartLines provides chartLines, LocalBarOut provides barOut,
         LocalPageForward provides { model.stack.isNotEmpty() }, LocalMorphing provides morphingNow, LocalCardPress provides { key, tap -> model.fromCard(key, tap) },
     ) {
     Box(Modifier.fillMaxSize()) {
@@ -422,7 +423,7 @@ fun App(model: AppModel = viewModel()) {
         }
         }
         // The container's outline, above everything, in the same coordinates the container is drawn in.
-        if (card != null) CardEdge()
+        if (card != null) { CardEdge(); ChartMorphLine(card) }
         // On the pages behind the tabs the bar sits at the bottom of the screen; on the tabs it is above the buttons.
         val bannerScope by model.bannerScope.collectAsState()
         val top = model.stack.lastOrNull()
