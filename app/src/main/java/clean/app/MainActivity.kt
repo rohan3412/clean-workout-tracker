@@ -337,6 +337,30 @@ fun App(model: AppModel = viewModel()) {
     LaunchedEffect(change) { if (card != null) { delay(Motion.CARD_TO_PAGE + 80L); settled = change } }
     val morphing = card != null && settled !== change
     val morphingNow = rememberUpdatedState(morphing).let { state -> { state.value } }
+    // A change between two pages is the same thing when a card on the page left (or returned to) opened the other: [link] names that
+    // card and the page that grew out of it. The page under it may be composed again on Back, so its card is looked for where it was last
+    // (`CardBounds.kept`); none unless the motion is on, the card is known and the page was opened by that card's own tap.
+    val top = model.stack.lastOrNull()
+    val lastTop = remember { arrayOfNulls<Screen>(1) }
+    SideEffect { lastTop[0] = model.stack.lastOrNull() }
+    val link: PageLink? = remember(top) {
+        val before = lastTop[0]
+        if (!motion || top == null || before == null || before == top) null
+        else {
+            val opening = model.stack.size >= 2 && model.stack[model.stack.size - 2] == before
+            val grown = if (opening) top else before
+            val under = if (opening) before else top
+            val key = model.cardKeyOf(grown)
+            val spot = key?.let { cards.kept(it, window.width.toFloat(), window.height.toFloat()) }
+            if (key == null || spot == null || model.cardPageOf(grown) != under.toString()) null
+            else { clip.begin(spot, Size(window.width.toFloat(), window.height.toFloat())); PageLink(key, grown) }
+        }
+    }
+    val pageChange = remember(top) { Any() }
+    var pageSettled by remember { mutableStateOf<Any?>(null) }
+    LaunchedEffect(pageChange) { if (link != null) { delay(Motion.CARD_TO_PAGE + 80L); pageSettled = pageChange } }
+    val pageMorphing = link != null && pageSettled !== pageChange
+    val pageMorphingNow = rememberUpdatedState(pageMorphing).let { state -> { state.value } }
     SharedTransitionLayout(Modifier.fillMaxSize()) {
     val shared = this
     val tabsMove = updateTransition(onTabs, "tabs")
@@ -349,6 +373,7 @@ fun App(model: AppModel = viewModel()) {
     val barOut = tabsMove.animateFloat({ if (!motion || card == null) snap() else Motion.cardBounds(!targetState) }, "bar") { if (it) 0f else 1f }
     CompositionLocalProvider(
         LocalSharedScope provides shared, LocalMorphClip provides clip, LocalMorphCard provides card, LocalCardBounds provides cards, LocalMorphTexts provides morphTexts, LocalChartLines provides chartLines, LocalBarOut provides barOut,
+        LocalPageMorphing provides pageMorphingNow, LocalPageMorphCard provides link?.key,
         LocalPageForward provides { model.stack.isNotEmpty() }, LocalMorphing provides morphingNow, LocalCardPress provides { key, tap -> model.fromCard(key, tap) },
     ) {
     Box(Modifier.fillMaxSize()) {
@@ -363,7 +388,9 @@ fun App(model: AppModel = viewModel()) {
         AnimatedContent(
             model.stack.lastOrNull(),
             transitionSpec = {
-                val toCard = card != null && ((initialState == null) != (targetState == null))
+                // The card's page stays under the other until the container is done, and is there from the first frame going back.
+                val toCard = if (link != null) initialState != null && targetState != null && (initialState == link.page || targetState == link.page)
+                else card != null && ((initialState == null) != (targetState == null))
                 when {
                     !motion -> EnterTransition.None togetherWith ExitTransition.None
                     // The container grows out of the card (or back into it) and the tabs page stays under it until it is done.
@@ -373,10 +400,18 @@ fun App(model: AppModel = viewModel()) {
             },
             label = "page",
         ) { screen ->
-        val pageCard = if (card != null && screen != null && screen == (if (onTabs) lastBottom[0] else model.stack.firstOrNull())) card else null
-        CompositionLocalProvider(LocalPageScope provides this, LocalPageCard provides pageCard) {
+        val tabCard = if (card != null && screen != null && screen == (if (onTabs) lastBottom[0] else model.stack.firstOrNull())) card else null
+        // The page that grew out of a card on the page under it, and the page under it, which stays what it was (a page that itself grew from a tab card keeps that card too).
+        val grownFrom = if (link != null && screen == link.page) link.key else null
+        val pageCard = grownFrom ?: tabCard
+        // How far this page is along a page card's change, on its own transition (the clock of the container's bounds): up for the page that grows, down for the one under it.
+        val still = !motion || link == null
+        val growing = transition.animateFloat({ if (still) snap() else Motion.cardBounds(true) }, "grown") { if (it == EnterExitState.Visible) 1f else 0f }
+        val beneath = transition.animateFloat({ if (still) snap() else Motion.cardBounds(true) }, "under") { if (it == EnterExitState.Visible) 0f else 1f }
+        val pageProgress = if (grownFrom != null) growing else beneath
+        CompositionLocalProvider(LocalPageScope provides this, LocalPageCard provides pageCard, LocalPageProgress provides pageProgress) {
         pages.SaveableStateProvider(screen?.toString()?.also { kept.add(it) } ?: "none") {
-        Box(Modifier.fillMaxSize().then(if (screen == null) Modifier else Modifier.testTag("page:" + screen::class.simpleName)).cardTarget(pageCard, morphing)) {
+        Box(Modifier.fillMaxSize().then(if (screen == null) Modifier else Modifier.testTag("page:" + screen::class.simpleName)).cardTarget(pageCard, if (grownFrom != null) pageMorphing else morphing)) {
         // Linen draws a white sheet under the pages that have a bar; the tabs, the full-screen chart and photos, and the arrange pages do not.
         val page: @Composable () -> Unit = { when (screen) {
             null -> Unit
@@ -423,7 +458,7 @@ fun App(model: AppModel = viewModel()) {
         }
         }
         // The container's outline, above everything, in the same coordinates the container is drawn in.
-        if (card != null) { CardEdge(); ChartMorphLine(card) }
+        if (card != null) { CardEdge(); ChartMorphLine(card) } else if (link != null) CardEdge()
         // On the pages behind the tabs the bar sits at the bottom of the screen; on the tabs it is above the buttons.
         val bannerScope by model.bannerScope.collectAsState()
         val top = model.stack.lastOrNull()
@@ -497,7 +532,10 @@ fun WorkoutBanner(model: AppModel, shape: Shape = cardTopShape()) {
     if (cancelling) Confirm("Cancel workout?", "Everything entered in this workout is thrown away.", "Discard", { model.cancelWorkout() }) { cancelling = false }
 }
 
-private val BLINK_TOTAL = (Motion.BLINK_OUT_MS + Motion.BLINK_IN_MS).toFloat()
+/** The card on one page that opened another, and the page that grew out of it (see the page change in [App]). */
+private class PageLink(val key: String, val page: Screen)
+
+private val BLINK_TOTAL =(Motion.BLINK_OUT_MS + Motion.BLINK_IN_MS).toFloat()
 private const val BLINK_REST = -1f
 /** The tab blink's opacity at [t] ms: out over [Motion.BLINK_OUT_MS], then in over [Motion.BLINK_IN_MS]; 1 at rest. */
 private fun blinkAlpha(t: Float): Float = when {

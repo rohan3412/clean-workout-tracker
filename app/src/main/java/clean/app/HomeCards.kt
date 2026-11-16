@@ -148,12 +148,15 @@ internal fun RecentPrsCard(model: AppModel, half: Boolean) {
     val rows = remember(workouts, prs, half) { prRows(workouts.takeLast(15), prs).reversed().take(if (half) 3 else 5) }
     Section("Recent PRs", spacing = Space.xxs, onClick = { model.open(Screen.PersonalBests) }) {
         if (rows.isEmpty()) EmptyPreview("Beat an exercise's best, or log a first workout of one, to earn a PR.") { PreviewSamples.Rows(56.dp, PreviewSamples.ROWS.take(3)) }
+        // An exercise's name is on Personal bests' page too (one line per exercise there), so the first row of each travels into it; a second PR of one lift just fades.
+        val seen = HashSet<String>()
         for (row in rows) {
             val kinds = PrKind.entries.filter { it in row.kinds }.joinToString(" · ") { it.label }
             val set = setValues(row.set, model.unitOf(row.exercise))
             LinkRow(
                 row.exercise, "${prettyDay(row.date)} · ${row.sidePrefix}$set", if (half) "" else kinds,
                 spoken = "${row.exercise}, ${prettyDay(row.date)}, ${row.sideWord}set $set, $kinds",
+                titleMorph = if (seen.add(row.exercise)) RowMorph("pr:name", row.exercise) else null,
             ) { model.open(Screen.ExerciseDetail(row.exercise, tab = 3)) }
         }
     }
@@ -170,7 +173,11 @@ internal fun RecentWorkoutsCard(model: AppModel) {
     Section("Recent workouts", spacing = Space.xxs, onClick = { model.openHistory() }) {
         if (last.isEmpty()) EmptyPreview("Finish a workout and it shows up here.", "Start workout", { model.stack.clear(); model.tab = Tab.Workout }) { PreviewSamples.Rows(56.dp, PreviewSamples.ROWS.take(3)) }
         last.forEachIndexed { i, w ->
-            LinkRow(w.name, "${prettyDay(w.date)} · ${duration(w.durationSeconds)}", model.volume(volumes[i])) { model.open(Screen.WorkoutDetail(w.date)) }
+            // The name and the day travel onto the same workout's card on the History page (see WorkoutCard).
+            LinkRow(
+                w.name, "${prettyDay(w.date)} · ${duration(w.durationSeconds)}", model.volume(volumes[i]),
+                titleMorph = RowMorph("row:name", w.date), dateMorph = RowMorph("row:date", w.date),
+            ) { model.open(Screen.WorkoutDetail(w.date)) }
         }
     }
 }

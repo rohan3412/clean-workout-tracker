@@ -413,6 +413,14 @@ fun SettingsScreen(model: AppModel) {
                     QuietButton("Import templates", { model.importTemplatesNow = true; model.stack.clear(); model.tab = Tab.Workout }, Modifier.fillMaxWidth())
                 }
             }
+            // Performance mode (2026-11-16, the user's words: "an option in settings called performance mode, to turn off all animations"):
+            // the old Animations switch turned over, kv `ui.motion` = `off` when on, so nothing moves anywhere (Motion, LocalMotion).
+            if (page == "Appearance") item(key = "ap-performance") {
+                Section("Performance") {
+                    Toggle(model, "ui.motion", "Performance mode", "Turns off every animation: cards growing into pages, fades, glides and celebrations. Everything changes at once.",
+                        inverted = true)
+                }
+            }
             if (page == "Appearance") item(key = "ap-preset") { PresetSection(model) }
             if (page == "Appearance") item(key = "ap-mono") { MonoSection(model) }
             if (page == "Appearance") item(key = "ap-daynight") { DayNightSection(model) }
@@ -473,7 +481,6 @@ fun SettingsScreen(model: AppModel) {
                         }) { Text("Use the preset's") }
                     }
                     Text("A .ttf or .otf file from this phone. It is copied into the app, nothing is downloaded.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Toggle(model, "ui.motion", "Animations", "Pages sliding in, buttons dipping when pressed, sets and cards gliding into place.")
                     Toggle(model, PREVIEW_LIVE, "Live preview", "After you change how something looks, a small pop-up shows it before and after.")
                     Toggle(model, "photos.blur", "Blur progress photos", "On Profile and in the photo list. A photo is sharp once you open it.", default = false)
                 }
@@ -1040,8 +1047,9 @@ private fun PresetFields(current: List<Int>, onSave: (List<Int>) -> Unit) {
 
 /** A switch for an on/off option stored under [key]. */
 @Composable
-private fun Toggle(model: AppModel, key: String, title: String, about: String = "", default: Boolean = true, onSwitch: (Boolean) -> Unit = { model.setOption(key, if (it) "on" else "off") }) {
-    val on = model.flag(key, default)
+private fun Toggle(model: AppModel, key: String, title: String, about: String = "", default: Boolean = true, inverted: Boolean = false, onSwitch: (Boolean) -> Unit = { model.setOption(key, if (it != inverted) "on" else "off") }) {
+    // [inverted]: the switch shows on while the stored flag is off (Performance mode is animations off).
+    val on = model.flag(key, default) != inverted
     // The whole row is the switch, read out as one; the drawn switch only shows the state.
     Row(Modifier.toggleable(on, role = Role.Switch, onValueChange = onSwitch).minTouch(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -1099,7 +1107,7 @@ SOFTWARE."""
 private val SETTINGS_PAGES = listOf(
     "Profile" to "Name, units, height, and switching between profiles",
     "Workout" to "Rest timer and its style, feedback, set rows, swipes and focus mode, weekly target, auto-fill, estimated 1RM, template colours, outside the app",
-    "Appearance" to "Presets, Mix and match, Day & night, Mono, Home, tab bar, charts, text size and font",
+    "Appearance" to "Performance mode, presets, Mix and match, Day & night, Mono, Home, tab bar, charts, text size and font",
     "Lists" to "What the exercise list and the calendar show",
     "Data" to "Backup and restore, import and export, Health Connect, animations, renames, delete everything",
     "Credits" to "Source code, what's new and licences",

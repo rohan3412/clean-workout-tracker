@@ -35,6 +35,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -167,7 +168,7 @@ fun WorkoutTab(model: AppModel) {
         val recent = sorted.filter { lastDone[it.name] != null }.take(3)
         if (recent.isNotEmpty() && templates.size > 3) {
             item { Text("Recent", Modifier.padding(start = Space.l, top = Space.s), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
-            items(recent, key = { "r${it.id}" }) { template -> TemplateCard(model, template, lastDone[template.name], folders, estimates[template.name]) }
+            items(recent, key = { "r${it.id}" }) { template -> TemplateCard(model, template, lastDone[template.name], folders, estimates[template.name], "workout:recent:${template.id}") }
         }
         val grouped = sorted.groupBy { it.folder }.toSortedMap(compareBy<String> { it.isEmpty() }.thenBy { !it.equals(CURRENT_SPLIT, ignoreCase = true) }.thenBy { it.lowercase() })
         // The current split is always there, even with nothing in it yet.
@@ -190,7 +191,7 @@ fun WorkoutTab(model: AppModel) {
                     Text("${list.size}  ${if (isOpen) "▾" else "▸"}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            if (isOpen) items(list, key = { it.id }) { template -> TemplateCard(model, template, lastDone[template.name], folders, estimates[template.name]) }
+            if (isOpen) items(list, key = { it.id }) { template -> TemplateCard(model, template, lastDone[template.name], folders, estimates[template.name], "workout:template:${template.id}") }
         }
         item { BarSpace() }
     }
@@ -200,7 +201,7 @@ fun WorkoutTab(model: AppModel) {
 }
 
 @Composable
-private fun TemplateCard(model: AppModel, template: Template, lastDone: String?, folders: List<String>, estimate: Long? = null) {
+private fun TemplateCard(model: AppModel, template: Template, lastDone: String?, folders: List<String>, estimate: Long? = null, key: String? = null) {
     val context = LocalContext.current
     var menu by remember { mutableStateOf(false) }
     var moving by remember { mutableStateOf(false) }
@@ -227,10 +228,11 @@ private fun TemplateCard(model: AppModel, template: Template, lastDone: String?,
     val colors by model.templateColors.collectAsState()
     if (colouring) TemplateColorSheet(model, template) { colouring = false }
     // The whole card opens the template's page; nothing inside takes a tap of its own but the menu and Start.
+    CompositionLocalProvider(LocalCardKey provides key) {
     Section("", onClick = { model.open(Screen.TemplateStats(template.id)) }) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             colors.ofId(template.id)?.let { TemplateDot(it, Modifier.padding(end = Space.s)) }
-            Text(template.name,Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            MorphText(androidx.compose.ui.text.AnnotatedString(template.name), "title", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             // Drawn 32 dp wide; its hit area is 48 dp, laid over the neighbours without moving them.
             Box(Modifier.size(32.dp).reach().clip(CircleShape).clickable { menu = true }, contentAlignment = Alignment.Center) {
                 Icon(CleanIcons.More, "Template options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -255,6 +257,7 @@ private fun TemplateCard(model: AppModel, template: Template, lastDone: String?,
             Text(listOfNotNull(ago(lastDone), estimate?.let { clean.core.estimateText(it) }).joinToString(" · "), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             QuietButton("Start", { model.start(template) })
         }
+    }
     }
     if (deleting) Confirm("Delete ${template.name}?", "Only the template goes; workouts already logged from it stay.", "Delete", { model.deleteTemplate(template.id) }) { deleting = false }
 }

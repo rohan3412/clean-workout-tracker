@@ -322,6 +322,18 @@ fun <T> Choice(options: List<T>, selected: T, label: (T) -> String, onSelect: (T
     }
 }
 
+/** [Choice] whose selected chip's words are the page's side of a [MorphText] with the role [morph]: a card's word that travels into the chip when the card opens this page. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun <T> MorphChoice(options: List<T>, selected: T, label: (T) -> String, morph: String, onSelect: (T) -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+        for (option in options) CleanChip(
+            selected = option == selected, onClick = { onSelect(option) },
+            label = { if (option == selected) MorphText(label(option), morph, onPage = true) else Text(label(option)) },
+        )
+    }
+}
+
 /**
  * Choices of a range or a period (1M / 3M / 1Y / All, Week / Month / Year / All): the chips everywhere but Linen, where the selected
  * one is a black pill with white words and the others plain quiet words, no outlines.

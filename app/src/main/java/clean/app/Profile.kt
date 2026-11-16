@@ -237,12 +237,13 @@ private fun MeasurementsCard(model: AppModel, half: Boolean) {
                 Modifier.fillMaxWidth().clickable { model.open(Screen.MeasurementDetail(file.name)) }.minTouch(),
                 horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
             ) {
+                // The label, the latest value and its day are on the Measurements page's row of the same file: each travels there.
                 Column(Modifier.weight(1f)) {
-                    Text(label, maxLines = 1)
-                    Text(prettyDay(last.date), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    MorphText(androidx.compose.ui.text.AnnotatedString(label), "m:label", maxLines = 1, id = file.name)
+                    MorphText(androidx.compose.ui.text.AnnotatedString(prettyDay(last.date)), "m:date", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, id = file.name)
                 }
                 Column(horizontalAlignment = Alignment.End) {
-                    Text("${shown(last, unit)} $suffix".trim(), style = MaterialTheme.typography.titleMedium.numbers())
+                    MorphText(androidx.compose.ui.text.AnnotatedString("${shown(last, unit)} $suffix".trim()), "m:value", style = MaterialTheme.typography.titleMedium.numbers(), id = file.name)
                     changeText(file.name, last, before, unit)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
             }
@@ -275,7 +276,11 @@ private fun TrophiesCard(model: AppModel) {
             if (awards.isEmpty()) "Badges, the week streak and the program" else "${earned.size} of ${awards.size} badges earned",
             fontWeight = FontWeight.Bold,
         )
-        if (latest != null) Text("Latest: ${latest.title}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // The latest badge is the first of the earned ones on the Trophies page: its name travels there.
+        if (latest != null) Row {
+            Text("Latest: ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            MorphText(androidx.compose.ui.text.AnnotatedString(latest.title), "badge", color = MaterialTheme.colorScheme.onSurfaceVariant, id = latest.title)
+        }
     }
 }
 

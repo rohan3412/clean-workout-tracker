@@ -74,6 +74,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -322,11 +323,15 @@ fun ExerciseList(
                     if (exercise == null) {
                         Text(row.heading.orEmpty(), Modifier.padding(start = Space.l, top = Space.l, bottom = Space.xs), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     } else {
-                        Row(Modifier.fillMaxWidth().clickable { if (!ticked.isNullOrEmpty()) onTick(exercise.name) else onClick(exercise.name) }.padding(start = Space.l, end = if (ticked != null) Space.xs else Space.l, top = Space.s, bottom = Space.s), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                        // On the Exercises tab each row is a container that grows into the exercise's page; a picker (no tab) keeps the plain row.
+                        val rowKey = if (tab != null) "exercises:${row.key}" else null
+                        CompositionLocalProvider(LocalCardKey provides rowKey) {
+                        val open = cardTap { onClick(exercise.name) }
+                        Row((if (rowKey != null) Modifier.opensInto(null, androidx.compose.ui.graphics.Color.Transparent, square = true) else Modifier).fillMaxWidth().then(Modifier.clickable { if (!ticked.isNullOrEmpty()) onTick(exercise.name) else open() }).padding(start = Space.l, end = if (ticked != null) Space.xs else Space.l, top = Space.s, bottom = Space.s), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                         // With animations on the phone, each exercise that has one shows a still of it.
                         if (thumbs) ExerciseThumb(exercise.name)
                         Column(Modifier.weight(1f)) {
-                            Text(exercise.name, style = MaterialTheme.typography.bodyLarge)
+                            MorphText(androidx.compose.ui.text.AnnotatedString(exercise.name), "title", style = MaterialTheme.typography.bodyLarge)
                             val main = musclesOf(exercise.name).primary
                             if (exercise.sessions == 0 && onMuscle != null && main.isNotEmpty()) {
                                 // In the Exercises tab a muscle under a name opens that muscle's page.
@@ -340,6 +345,7 @@ fun ExerciseList(
                             )
                         }
                         if (ticked != null) androidx.compose.material3.Checkbox(exercise.name in ticked, { onTick(exercise.name) }, Modifier.semantics { contentDescription = "Pick ${exercise.name}" })
+                        }
                         }
                         HorizontalDivider()
                     }
@@ -953,9 +959,10 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                 val bodyweight = bodyweights.at(session.date)
                 // Looked at between sets, so many sessions should fit on the screen: small text, little air inside and between.
                 val small = MaterialTheme.typography.bodyMedium
+                CompositionLocalProvider(LocalCardKey provides "page:exercise:$name:${session.date}") {
                 Section("", onClick = { model.open(Screen.WorkoutDetail(session.date)) }, spacing = Space.xs, inner = Space.s, outer = Space.xs) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(workout?.name ?: "Workout", Modifier.weight(1f), fontWeight = FontWeight.Bold, maxLines = 1)
+                        MorphText(workout?.name ?: "Workout", "title", Modifier.weight(1f), fontWeight = FontWeight.Bold, maxLines = 1)
                         Text(prettyDay(session.date), style = small, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Column {
@@ -992,6 +999,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                             }
                         }
                     }
+                }
                 }
             }
         }

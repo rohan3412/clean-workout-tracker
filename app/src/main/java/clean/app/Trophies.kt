@@ -155,7 +155,7 @@ fun TrophiesScreen(model: AppModel) {
                             else -> model.open(Screen.Trends)
                         }
                     }
-                    for (a in earned) TrophyRow(CleanIcons.Star, a.title, prettyDay(a.earned!!), true) { open(a) }
+                    for (a in earned) TrophyRow(CleanIcons.Star, a.title, prettyDay(a.earned!!), true, morph = true) { open(a) }
                     val next = nextMilestones(awards, streak.length, c.total, program?.streak?.length ?: 0)
                     for (n in next) {
                         val unit = if (n.award.ladder == Ladder.WORKOUTS) "workout" else "week"
@@ -202,13 +202,14 @@ fun TrophiesScreen(model: AppModel) {
 
 /** A badge: a star, its name, and the day it was earned. Not yet earned, it is dimmed and has no day. */
 @Composable
-private fun TrophyRow(icon: ImageVector, title: String, day: String, earned: Boolean, onClick: () -> Unit) {
+private fun TrophyRow(icon: ImageVector, title: String, day: String, earned: Boolean, morph: Boolean = false, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = Space.xs),
         horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, Modifier.size(20.dp), tint = if (earned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f))
-        Text(title, Modifier.weight(1f), color = if (earned) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+        val ink = if (earned) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
+        if (morph) MorphText(androidx.compose.ui.text.AnnotatedString(title), "badge", Modifier.weight(1f), onPage = true, color = ink, id = title) else Text(title, Modifier.weight(1f), color = ink)
         if (day.isNotEmpty()) Text(day, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

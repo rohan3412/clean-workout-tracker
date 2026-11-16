@@ -95,6 +95,9 @@ object Motion {
     /** What is on both the card and the page but not alike (a title, a number, a chart) crosses over while it travels. */
     fun morphIn(): TweenSpec<Float> = tween(CARD_TO_PAGE / 2, delayMillis = CARD_TO_PAGE / 4, easing = Emphasized)
     fun morphOut(): TweenSpec<Float> = tween(CARD_TO_PAGE / 2, delayMillis = CARD_TO_PAGE / 4, easing = Emphasized)
+    /** A row going below the page by itself fades only late in the way, 250 to 450 ms of the 500, so nothing is left when it ends (Back: 50 to 250 ms) */
+    fun rowOut(): TweenSpec<Float> = tween(CARD_TO_PAGE * 2 / 5, delayMillis = CARD_TO_PAGE / 2, easing = LinearEasing)
+    fun rowIn(): TweenSpec<Float> = tween(CARD_TO_PAGE * 2 / 5, delayMillis = CARD_TO_PAGE / 10, easing = LinearEasing)
     /** The tabs page stays under the growing container until it is done (opening), and is there from the first frame going back. */
     fun <T> tabsHold(forward: Boolean): TweenSpec<T> = if (forward) tween(1, delayMillis = CARD_TO_PAGE) else tween(1)
 
@@ -136,6 +139,9 @@ object Motion {
     /** A PR's glow fading out. */
     fun <T> glow(): TweenSpec<T> = tween(scaled(GLOW), easing = Standard)
     fun jiggle(seed: Int): InfiniteRepeatableSpec<Float> = infiniteRepeatable(tween(scaled(JIGGLE) + (seed.absoluteValue % 6) * 15, easing = Standard), RepeatMode.Reverse)
+    /** The body figure's colours sliding in from the side after a swipe between its views; the grey body stays still. */
+    const val VIEW_SLIDE = 300
+    fun <T> viewSlide(): TweenSpec<T> = tween(scaled(VIEW_SLIDE), easing = Standard)
     /** A PR's confetti flying: linear, the pieces carry their own easing. */
     fun <T> confetti(): TweenSpec<T> = tween(scaled(CONFETTI), easing = LinearEasing)
     /** The rest's drain. */

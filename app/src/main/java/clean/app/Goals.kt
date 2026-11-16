@@ -148,8 +148,8 @@ internal fun SetGoalSheet(model: AppModel, onDismiss: () -> Unit) {
     if (picking || exercise != null || weighing) return
     Sheet(onDismiss, "Set a goal") {
         Column(Modifier.padding(horizontal = Space.xl)) {
-            NavRow("Exercise", "") { picking = true }
-            NavRow("Body weight", "") { if (current == null) model.message = "Log a weight first" else weighing = true }
+            NavRow("Exercise", "", { picking = true })
+            NavRow("Body weight", "", { if (current == null) model.message = "Log a weight first" else weighing = true })
         }
     }
 }

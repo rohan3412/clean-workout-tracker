@@ -19,6 +19,8 @@ import clean.app.ui.theme.CleanColors
 import clean.app.ui.theme.LocalCleanColors
 import clean.app.ui.theme.SmallShape
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.vector.PathParser
 import android.graphics.Region
@@ -177,11 +179,12 @@ fun MeasurementsScreen(model: AppModel) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(label, style = MaterialTheme.typography.bodyLarge)
+                // What Profile's Body measurements card shows of this file travels here from there (it is only the card's words when this page grew out of it).
+                MorphText(androidx.compose.ui.text.AnnotatedString(label), "m:label", onPage = true, style = MaterialTheme.typography.bodyLarge, id = file.name)
                 if (last == null) Text(NONE, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 else Column(horizontalAlignment = Alignment.End) {
-                    Text("${shown(last, unit)} ${if (file.name == "weight.csv") unit else fileUnit}".trim())
-                    Text(prettyDay(last.date), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    MorphText(androidx.compose.ui.text.AnnotatedString("${shown(last, unit)} ${if (file.name == "weight.csv") unit else fileUnit}".trim()), "m:value", onPage = true, id = file.name)
+                    MorphText(androidx.compose.ui.text.AnnotatedString(prettyDay(last.date)), "m:date", onPage = true, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, id = file.name)
                 }
             }
             HorizontalDivider()
@@ -259,13 +262,19 @@ internal fun BodyMini(model: AppModel) {
     }
     val view = if (mode in MINI_VIEWS) mode else "Balance"
     val at = MINI_VIEWS.indexOf(view)
+    // A swipe tells the figure which way it went, so the colours slide in from that side; a change from anywhere else does not.
+    val slide = remember { ViewSlide() }
     Column(
-        Modifier.swipeSteps(onPrevious = { MINI_VIEWS.getOrNull(at - 1)?.let { mode = it } }, onNext = { MINI_VIEWS.getOrNull(at + 1)?.let { mode = it } }),
+        Modifier.swipeSteps(
+            onPrevious = { MINI_VIEWS.getOrNull(at - 1)?.let { slide.dir = -1; mode = it } },
+            onNext = { MINI_VIEWS.getOrNull(at + 1)?.let { slide.dir = 1; mode = it } },
+        ),
         verticalArrangement = Arrangement.spacedBy(Space.s),
     ) {
-        BodyFigure(colours, interactive = false, description = "Body figure, $view view")
+        BodyFigure(colours, interactive = false, slide = slide, description = "Body figure, $view view")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text(view, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // The word travels into the selected chip of the Body page when the card opens it.
+            MorphText(androidx.compose.ui.text.AnnotatedString(view), "view", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             // One dot per view, the current one in the accent: there is more to the side.
             Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
                 for (i in MINI_VIEWS.indices) Box(Modifier.size(6.dp).background(if (i == at) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.24f), CircleShape))
@@ -313,13 +322,15 @@ internal fun MuscleCard(model: AppModel, limit: Int? = null, onAll: (() -> Unit)
     val headTip = { head: Head -> headData.sets[head]?.let { setsText(shortNumber(Math.round(it * 10) / 10.0)) } ?: "not trained" }
 
     // A sideways swipe on the figure goes to the view before or after.
+    // It tells the figure which way it went, so the colours slide in from that side (a tap on a chip does not).
+    val slide = remember { ViewSlide() }
     val swipe = Modifier.swipeSteps(
-        onPrevious = { modes.getOrNull(modes.indexOf(view) - 1)?.let { mode = it } },
-        onNext = { modes.getOrNull(modes.indexOf(view) + 1)?.let { mode = it } },
+        onPrevious = { modes.getOrNull(modes.indexOf(view) - 1)?.let { slide.dir = -1; mode = it } },
+        onNext = { modes.getOrNull(modes.indexOf(view) + 1)?.let { slide.dir = 1; mode = it } },
     )
     LaunchedEffect(view) { openGroup = null }
     Section("") {
-        Choice(modes, view, { it }) { mode = it }
+        MorphChoice(modes, view, { it }, "view") { mode = it }
         when (view) {
             "Balance" -> {
                 val sets by model.muscleSetCounts.collectAsState()
@@ -327,7 +338,7 @@ internal fun MuscleCard(model: AppModel, limit: Int? = null, onAll: (() -> Unit)
                 Box(swipe) {
                     BodyFigure(
                         sets.mapValues { (_, v) -> shade(palette, v / max) }, open,
-                        headColours = headColours(palette.first(), true), open = openGroup, onHead = openHead, headTip = headTip, zoomable = true,
+                        headColours = headColours(palette.first(), true), open = openGroup, onHead = openHead, headTip = headTip, zoomable = true, slide = slide,
                         description = topMuscles(sets, 0.01).let { if (it.isEmpty()) "Body figure: nothing trained" else "Body figure: most worked $it" },
                     ) { m -> sets[m]?.let { setsText(shortNumber(Math.round(it * 10) / 10.0)) } ?: "not trained" }
                 }
@@ -357,7 +368,7 @@ internal fun MuscleCard(model: AppModel, limit: Int? = null, onAll: (() -> Unit)
                 Box(swipe) {
                     BodyFigure(
                         Muscle.entries.associateWith { colour(levels[it] ?: 0.0) }, open,
-                        headColours = headColours(openGroup?.let { colour(levels[it] ?: 0.0) } ?: meaning.ready, false), open = openGroup, onHead = openHead, headTip = headTip, zoomable = true,
+                        headColours = headColours(openGroup?.let { colour(levels[it] ?: 0.0) } ?: meaning.ready, false), open = openGroup, onHead = openHead, headTip = headTip, zoomable = true, slide = slide,
                         sideColours = limbs, headSideColours = headSideColours { g, s -> colour(levelOf(g, s)) },
                         sideTip = { m, s -> fatigueWord(levelOf(m, s)) },
                         description = topMuscles(levels, FATIGUE_RECOVERING).let { if (it.isEmpty()) "Body figure: every muscle ready" else "Body figure: most tired $it" },
@@ -394,7 +405,7 @@ internal fun MuscleCard(model: AppModel, limit: Int? = null, onAll: (() -> Unit)
                 Box(swipe) {
                     BodyFigure(
                         strength.filterKeys { it in last }.mapValues { (_, v) -> colour(v) }, open,
-                        headColours = headColours(openGroup?.let { colour(strength[it] ?: STRENGTH_FLOOR) } ?: meaning.full, false), open = openGroup, onHead = openHead, headTip = headTip, zoomable = true,
+                        headColours = headColours(openGroup?.let { colour(strength[it] ?: STRENGTH_FLOOR) } ?: meaning.full, false), open = openGroup, onHead = openHead, headTip = headTip, zoomable = true, slide = slide,
                         sideColours = limbs, headSideColours = headSideColours { g, s -> if (g in last) colour(levelOf(g, s)) else null },
                         sideTip = { m, s -> "${Math.round(levelOf(m, s) * 100)}% retained" },
                     ) { m -> "${Math.round((strength[m] ?: STRENGTH_FLOOR) * 100)}% retained" }
@@ -428,7 +439,7 @@ internal fun MuscleCard(model: AppModel, limit: Int? = null, onAll: (() -> Unit)
                 Box(swipe) {
                     BodyFigure(
                         credits.mapValues { (_, c) -> shadeOf((c.left + c.right) / 2) }, open,
-                        headColours = headLines.mapNotNull { l -> l.head?.let { it to l.colour } }.toMap(), open = openGroup, onHead = openHead, headTip = headTip, zoomable = true,
+                        headColours = headLines.mapNotNull { l -> l.head?.let { it to l.colour } }.toMap(), open = openGroup, onHead = openHead, headTip = headTip, zoomable = true, slide = slide,
                         sideColours = limbs,
                         headSideColours = headLines.flatMap { l -> l.sided?.let { s -> listOf((l.head!! to Side.LEFT) to s.leftColour, (l.head to Side.RIGHT) to s.rightColour) } ?: emptyList() }.toMap(),
                         sideTip = { m, s -> credits[m]?.let { setsText(oneDecimal(it.of(s))) } ?: "not trained" },
@@ -624,6 +635,28 @@ private fun outlines(parts: List<BodyPart>): List<Outline> {
 private val FRONT: List<Outline> by lazy { outlines(BODY_FRONT) }
 private val BACK: List<Outline> by lazy { outlines(BODY_BACK) }
 
+// The body of each view as one shape (every muscle's outline, not the heads): colour sliding sideways shows only inside it.
+private val FRONT_BODY: Path by lazy { bodyShape(FRONT) }
+private val BACK_BODY: Path by lazy { bodyShape(BACK) }
+private fun bodyShape(parts: List<Outline>): Path =
+    parts.filter { it.muscle != null && it.head == null }.map { it.path }.reduce { a, b -> Path.combine(androidx.compose.ui.graphics.PathOperation.Union, a, b) }
+
+/** The colours a figure shows: each muscle's, and each limb's where it has its own. */
+internal data class SlideLayer(val colours: Map<Muscle, Color>, val limbs: Map<Pair<Muscle, Side>, Color>)
+
+/**
+ * What a figure is told about a change of view. A swipe sets [dir] (1 when it went to the next view, so the colours move left, -1 to
+ * the one before) just before the colours change; the figure takes it and clears it. [last] is the colours the figure showed last,
+ * which the page's figure (a new one for each view) could not otherwise know. A change of view without a swipe leaves [dir] 0.
+ */
+class ViewSlide {
+    var dir = 0
+    internal var last: SlideLayer? = null
+}
+
+/** One slide in progress: the colours that are leaving, the way they go, and how far along it is. */
+private class SlideRun(val from: SlideLayer, val dir: Int) { val p = androidx.compose.animation.core.Animatable(0f) }
+
 // Each view is 727 wide and 1280 tall, starting at y 95; the back view's own x starts at 718.
 private const val VIEW_WIDTH = 727f
 private const val VIEW_HEIGHT = 1280f
@@ -673,6 +706,8 @@ fun BodyFigure(
     interactive: Boolean = true,
     /** What a screen reader says for the figure; the muscles themselves are reached through the rows beside it. */
     description: String = "Body figure",
+    /** Set by a swipe between views: when the colours change after one, the old ones slide out and the new ones in from the side, the grey body staying still. */
+    slide: ViewSlide? = null,
     tip: ((Muscle) -> String)? = null,
 ) {
     val neutral = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.32f)
@@ -693,6 +728,16 @@ fun BodyFigure(
     val motion = LocalMotion.current
     val spec = if (motion) Motion.short<Color>() else snap()
     val heads = Head.entries.associateWith { animateColorAsState(headColours[it] ?: Color.Transparent, spec, label = "head").value }
+    // A swipe slides the colours in from the side: one run for each change of colours, started in composition so its first frame is
+    // already the old colours (no frame of the new ones first). Without a swipe, or without animations, the colours change as they did.
+    val layer = SlideLayer(colors, sideColours)
+    val travel = remember(layer) {
+        val before = slide?.last
+        val way = slide?.dir ?: 0
+        if (slide != null) { slide.last = layer; slide.dir = 0 }
+        if (motion && way != 0 && before != null && before != layer) SlideRun(before, way) else null
+    }
+    LaunchedEffect(travel) { travel?.p?.animateTo(1f, Motion.viewSlide()) }
     val dim by animateFloatAsState(if (open != null) 0.4f else 1f, if (motion) Motion.short() else snap(), label = "dim")
     // Gone with the figure, so it starts at normal size again when the view changes or the page is left.
     val zoom = remember { Zoom() }
@@ -780,7 +825,10 @@ fun BodyFigure(
             }
         })) {
             val scale = size.width / (2 * VIEW_WIDTH)
-            for ((left, parts) in listOf(0f to FRONT, VIEW_WIDTH - BACK_LEFT to BACK)) {
+            val run = travel
+            val t = run?.p?.value ?: 1f
+            val sliding = run != null && t < 1f
+            for ((left, parts, body) in listOf(Triple(0f, FRONT, FRONT_BODY), Triple(VIEW_WIDTH - BACK_LEFT, BACK, BACK_BODY))) {
                 withTransform({
                     translate(zoom.pan.x, zoom.pan.y)
                     scale(zoom.scale, zoom.scale, Offset.Zero)
@@ -797,8 +845,24 @@ fun BodyFigure(
                             }
                         } else {
                             val own = part.muscle?.let { m -> part.side?.let { sideShown[m to it] } }
-                            val fill = part.muscle?.let { own ?: colors[it] ?: neutral } ?: inert
+                            // While the colours slide, every muscle is the grey of an untrained one and the colours are drawn over it below.
+                            val fill = part.muscle?.let { if (sliding) neutral else own ?: colors[it] ?: neutral } ?: inert
                             drawPath(part.path, if (open != null && part.muscle != null && part.muscle != open) fill.copy(alpha = fill.alpha * dim) else fill)
+                        }
+                    }
+                    if (run != null && sliding) {
+                        // The leaving colours go the way the finger went and the coming ones follow from the other side, both only inside the body.
+                        for ((shown, shift) in listOf(run.from to -run.dir * VIEW_WIDTH * t, layer to run.dir * VIEW_WIDTH * (1f - t))) {
+                            clipPath(body) {
+                                translate(left = shift) {
+                                    for (part in parts) {
+                                        val m = part.muscle
+                                        if (part.head != null || m == null) continue
+                                        val c = part.side?.let { shown.limbs[m to it] } ?: shown.colours[m]
+                                        if (c != null) drawPath(part.path, c)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -882,6 +946,7 @@ fun MeasurementDetailScreen(model: AppModel, fileName: String) {
     if (logging) WeightSheet(model) { logging = false }
     // The last workout of each day, for the dates that lead to one.
     val byDay = remember(workouts) { workouts.associateBy { it.day } }
+    val latest = measurements.firstOrNull { it.file == fileName }
     Scaffold(containerColor = pageContainer(), topBar = { BackBar(label, model::back) }) { padding ->
         LazyColumn(Modifier.padding(padding).fillMaxSize()) {
             item {
@@ -937,7 +1002,9 @@ fun MeasurementDetailScreen(model: AppModel, fileName: String) {
                     // A date with a workout on it opens that workout.
                     val workout = byDay[entry.date.take(10)]
                     Text(prettyDate(entry.date), Modifier.weight(1f).clickable(enabled = workout != null) { workout?.let { model.open(Screen.WorkoutDetail(it.date)) } }, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("${shown(entry, profile?.unit ?: "kg")} $unit".trim())
+                    val value = "${shown(entry, profile?.unit ?: "kg")} $unit".trim()
+                    // The latest entry is the number a card showing the latest weigh-in travels to.
+                    if (entry.id == latest?.id) MorphText(androidx.compose.ui.text.AnnotatedString(value), "number", onPage = true) else Text(value)
                     IconButton(onClick = { model.deleteMeasurement(entry) }) { Icon(CleanIcons.Delete, "Delete entry") }
                 }
                 HorizontalDivider()

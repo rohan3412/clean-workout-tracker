@@ -93,16 +93,30 @@ import java.time.format.DateTimeFormatter
 
 private val MONTH_TITLE: DateTimeFormatter = DateTimeFormatter.ofPattern("MMMM yyyy")
 
-/** A row that leads somewhere: a title with a line under it, and a value on the right. */
+/** What a [LinkRow]'s title (or the first part of its line, the date) is on the page its card opens: the same role and [id] there make it one text that travels (see [MorphText]). */
+class RowMorph(val role: String, val id: String)
+
+/**
+ * A row that leads somewhere: a title with a line under it, and a value on the right. [titleMorph] makes the title travel into the same
+ * words on the page the row's card opens; [dateMorph] does that for the line's first part, the words before its first " · ".
+ */
 @Composable
-fun LinkRow(title: String, subtitle: String, value: String, spoken: String? = null, modifier: Modifier = Modifier, onClick: () -> Unit) {
+fun LinkRow(title: String, subtitle: String, value: String, spoken: String? = null, modifier: Modifier = Modifier, titleMorph: RowMorph? = null, dateMorph: RowMorph? = null, onClick: () -> Unit) {
     Row(
         modifier.fillMaxWidth().clickable(onClick = onClick).then(if (spoken != null) Modifier.semantics(mergeDescendants = true) { contentDescription = spoken } else Modifier).padding(vertical = Space.xs),
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(title)
-            if (subtitle.isNotEmpty()) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (titleMorph != null) MorphText(androidx.compose.ui.text.AnnotatedString(title), titleMorph.role, id = titleMorph.id) else Text(title)
+            if (subtitle.isNotEmpty()) {
+                val small = MaterialTheme.typography.bodySmall
+                val quiet = MaterialTheme.colorScheme.onSurfaceVariant
+                val cut = subtitle.indexOf(" · ")
+                if (dateMorph != null && cut > 0) Row {
+                    MorphText(androidx.compose.ui.text.AnnotatedString(subtitle.substring(0, cut)), dateMorph.role, style = small, color = quiet, id = dateMorph.id)
+                    Text(subtitle.substring(cut), style = small, color = quiet)
+                } else Text(subtitle, style = small, color = quiet)
+            }
         }
         Text(value, Modifier.padding(start = Space.s), color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -677,11 +691,11 @@ fun SummaryScreen(model: AppModel, date: String) {
             }
             onProgram?.let { o ->
                 item {
-                    Section("", onClick = { model.open(Screen.Trophies) }) {
+                    androidx.compose.runtime.CompositionLocalProvider(LocalCardKey provides "page:summary:program") { Section("", onClick = { model.open(Screen.Trophies) }) {
                         Text(if (o.different == 0) "${o.label}, on program" else "${o.label}, ${plural(o.different, "exercise")} different", fontWeight = FontWeight.Bold)
                         if (programFresh.second) Text("Week on program", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                         for (award in programFresh.first) Text("New badge: ${award.title}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    }
+                    } }
                 }
             }
             // Sets of bodyweight and assisted lifts that have no load because no weigh-in is near the workout.
@@ -802,7 +816,7 @@ private fun CelebrationBlock(model: AppModel, earned: Earned) {
     LaunchedEffect(Unit) { if (motion) pop.animateTo(1f, Motion.reward()) }
     val accent = MaterialTheme.colorScheme.primary
     val scaled = Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value }
-    Section("", onClick = { model.open(Screen.Trophies) }) {
+    androidx.compose.runtime.CompositionLocalProvider(LocalCardKey provides "page:summary:celebration") { Section("", onClick = { model.open(Screen.Trophies) }) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.l)) {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
                 if (earned.targetHit) ProgressRing(1f, Modifier.size(72.dp), from = 0f) { Icon(CleanIcons.Star, null, Modifier.size(32.dp).then(scaled), tint = accent) }
@@ -815,7 +829,7 @@ private fun CelebrationBlock(model: AppModel, earned: Earned) {
                 if (earned.shield) Text("Shield earned", fontWeight = FontWeight.Bold)
             }
         }
-    }
+    } }
 }
 
 /** One week of training (Monday to Sunday): totals, each muscle against what has been usual, PRs and the workouts. */

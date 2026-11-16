@@ -206,7 +206,7 @@ internal fun WeightTile(model: AppModel) {
             moved == "0" -> "no change"
             else -> "${if (change!! > 0) "+" else ""}$moved $unit in 30 days"
         },
-        spark = weightLine(weights), link = "chart:weight",
+        spark = weightLine(weights), link = "chart:weight", valueRole = "number",
         onAdd = { logging = true }, addLabel = "Log body weight",
     ) { if (current == null) model.logWeight() else model.open(Screen.MeasurementDetail("weight.csv")) }
 }
@@ -419,7 +419,8 @@ internal fun BodyWeightCard(model: AppModel) {
                 val (first, last) = shown.first() to shown.last()
                 val change = last.second - first.second
                 Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                    Text("${showWeight(last.second, unit)} $unit", style = MaterialTheme.typography.headlineMedium.numbers(), fontWeight = FontWeight.SemiBold)
+                    // The latest weigh-in is the first entry of the weight page's list: the number travels there.
+                    MorphText(androidx.compose.ui.text.AnnotatedString("${showWeight(last.second, unit)} $unit"), "number", style = MaterialTheme.typography.headlineMedium.numbers(), fontWeight = FontWeight.SemiBold)
                     Text(
                         "${if (change > 0) "+" else ""}${showWeight(change, unit)} $unit since ${first.first.format(SHORT_DAY)}",
                         Modifier.padding(bottom = Space.xs), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,

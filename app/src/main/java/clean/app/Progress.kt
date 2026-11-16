@@ -70,10 +70,16 @@ import java.time.LocalDate
 
 /** A line that opens a page, with the page's headline number at the right and a chevron. */
 @Composable
-internal fun NavRow(title: String, value: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).minTouch(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text(title, style = MaterialTheme.typography.bodyMedium)
-        Text(if (value.isEmpty()) "›" else "$value ›", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+internal fun NavRow(title: String, value: String, onClick: () -> Unit, key: String? = null) {
+    // With a key the row is a container that grows into its page (see [opensInto]); without one it is the blink, even inside a card that has a key.
+    CompositionLocalProvider(LocalCardKey provides key) {
+        Row(
+            (if (key != null) Modifier.opensInto(null, cardFill(), square = true) else Modifier).fillMaxWidth().clickable(onClick = if (key != null) cardTap(onClick) else onClick).minTouch(),
+            horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MorphText(androidx.compose.ui.text.AnnotatedString(title), "title", style = MaterialTheme.typography.bodyMedium)
+            Text(if (value.isEmpty()) "›" else "$value ›", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -143,13 +149,15 @@ private fun ColumnScope.HistoryRows(model: AppModel) {
     LazyColumn(Modifier.weight(1f).fillMaxWidth(), state, verticalArrangement = Arrangement.spacedBy(Space.s)) {
         items(rows, key = { it.date }) { w ->
             val count = remember(w, prs) { recordCount(w, prs[w.date].orEmpty()) }
-            Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
-                Text(w.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
-                if (count > 0) Row(Modifier.semantics(mergeDescendants = true) { contentDescription = "${shortNumber(count)} PRs" }, verticalAlignment = Alignment.CenterVertically) {
+            // Each row is one thing that travels as the card opens (its own page's matching card, or below the bottom of the page), with its
+            // name, PR count and date moving separately onto their places on that card (Modifier.morphs, MorphText, role "row:...").
+            Row(Modifier.morphs("row:out", w.date, late = true), horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
+                MorphText(androidx.compose.ui.text.AnnotatedString(w.name), "row:name", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, id = w.date)
+                if (count > 0) Row(Modifier.morphs("row:prs", w.date).semantics(mergeDescendants = true) { contentDescription = "${shortNumber(count)} PRs" }, verticalAlignment = Alignment.CenterVertically) {
                     Icon(CleanIcons.Star, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
                     Text(shortNumber(count), maxLines = 1, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
                 }
-                Text(LocalDate.parse(w.day).format(SHORT_DAY), maxLines = 1, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                MorphText(androidx.compose.ui.text.AnnotatedString(LocalDate.parse(w.day).format(SHORT_DAY)), "row:date", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, id = w.date)
             }
         }
     }
@@ -189,9 +197,9 @@ fun ProgressTab(model: AppModel) {
 
 /** A line with a name at the left and what it found at the right (ellipsised), opening the page of that thing. */
 @Composable
-private fun TopRow(label: String, value: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).minTouch(), horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
+private fun TopRow(label: String, value: String, key: String, onClick: () -> Unit) = CompositionLocalProvider(LocalCardKey provides key) {
+    Row(Modifier.opensInto(null, cardFill(), square = true).fillMaxWidth().clickable(onClick = cardTap(onClick)).minTouch(), horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
+        MorphText(androidx.compose.ui.text.AnnotatedString(label), "title", style = MaterialTheme.typography.bodyMedium)
         Text("$value ›", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -313,18 +321,18 @@ private fun StatisticsCard(model: AppModel) {
                 }
             }
             Column {
-                figures.muscle?.let { (m, n) -> TopRow("Most trained muscle", "${m.label}, ${setsText(shortNumber(Math.round(n * 10) / 10.0))}") { model.open(Screen.MuscleDetail(m)) } }
-                figures.exercise?.let { (e, n) -> TopRow("Top exercise", "$e, ${setsText(shortNumber(n))}") { model.open(Screen.ExerciseDetail(e)) } }
+                figures.muscle?.let { (m, n) -> TopRow("Most trained muscle", "${m.label}, ${setsText(shortNumber(Math.round(n * 10) / 10.0))}", "progress:stat:muscle") { model.open(Screen.MuscleDetail(m)) } }
+                figures.exercise?.let { (e, n) -> TopRow("Top exercise", "$e, ${setsText(shortNumber(n))}", "progress:stat:exercise") { model.open(Screen.ExerciseDetail(e)) } }
             }
         }
         // The pages of statistics, the rows touching each other (each 48 dp).
         Column {
-            NavRow("Trends", "${workouts.count { it.day >= monday }} this week") { model.open(Screen.Trends) }
-            NavRow("Personal bests", "${shortNumber(recentPrCount(model))} in 30 days") { model.open(Screen.PersonalBests) }
-            NavRow("Trophies", plural(consistency?.streak?.length ?: 0, "week") + " streak") { model.open(Screen.Trophies) }
-            NavRow("Calendar", "${workouts.count { it.day.startsWith(month) }} this month") { model.open(Screen.Calendar()) }
-            NavRow("Measurements", kg?.let { "${showWeight(it, unit)} $unit" } ?: NONE) { model.open(Screen.Measurements) }
-            NavRow("BMI", if (kg != null && height != null) shortNumber(Math.round(bmi(kg, height) * 10) / 10.0) else NONE) { model.open(Screen.Bmi) }
+            NavRow("Trends", "${workouts.count { it.day >= monday }} this week", { model.open(Screen.Trends) }, "progress:stat:trends")
+            NavRow("Personal bests", "${shortNumber(recentPrCount(model))} in 30 days", { model.open(Screen.PersonalBests) }, "progress:stat:bests")
+            NavRow("Trophies", plural(consistency?.streak?.length ?: 0, "week") + " streak", { model.open(Screen.Trophies) }, "progress:stat:trophies")
+            NavRow("Calendar", "${workouts.count { it.day.startsWith(month) }} this month", { model.open(Screen.Calendar()) }, "progress:stat:calendar")
+            NavRow("Measurements", kg?.let { "${showWeight(it, unit)} $unit" } ?: NONE, { model.open(Screen.Measurements) }, "progress:stat:measurements")
+            NavRow("BMI", if (kg != null && height != null) shortNumber(Math.round(bmi(kg, height) * 10) / 10.0) else NONE, { model.open(Screen.Bmi) }, "progress:stat:bmi")
         }
     }
 }

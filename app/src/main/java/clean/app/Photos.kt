@@ -476,7 +476,8 @@ private const val STRIP_SLOTS = 4
 private fun DatedPhoto(model: AppModel, photo: Photo, px: Int, modifier: Modifier, showDay: Boolean, onClick: () -> Unit) {
     val scrim = MaterialTheme.colorScheme.scrim
     Box(modifier.semantics { contentDescription = "${photo.pose.label} photo, ${prettyDay(photo.day)}"; role = Role.Button }.pressable(onClick = onClick)) {
-        PhotoThumb(model, photo, px, Modifier.fillMaxSize())
+        // The same photo is in the timeline on the page this card opens: it travels there, resizing (both are 3:4, so it only scales).
+        PhotoThumb(model, photo, px, Modifier.fillMaxSize().morphs("photo", photo.name, scaled = true))
         if (showDay) {
             Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, scrim.copy(alpha = 0.7f)))).padding(start = Space.m, end = Space.m, top = Space.xxxl, bottom = Space.s)) {
                 Text(prettyDay(photo.day), color = scrim.readableOn(), style = MaterialTheme.typography.labelLarge, maxLines = 1)
@@ -570,7 +571,8 @@ fun PhotosScreen(model: AppModel) {
                             for (photo in row) Column(Modifier.weight(1f)) {
                                 PhotoThumb(
                                     model, photo, 360,
-                                    Modifier.fillMaxWidth().aspectRatio(3f / 4f).clip(SmallShape)
+                                    // Before the clip, so the photo travelling in from the card has the thumbnail's corners.
+                                    Modifier.fillMaxWidth().aspectRatio(3f / 4f).morphs("photo", photo.name, scaled = true).clip(SmallShape)
                                         .semantics { contentDescription = "${photo.pose.label} photo, ${prettyDay(photo.day)}"; role = Role.Button }
                                         .pressable { model.open(Screen.Photo(photo.name, filter)) },
                                 )

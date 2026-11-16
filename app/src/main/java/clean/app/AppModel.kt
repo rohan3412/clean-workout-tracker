@@ -1232,11 +1232,16 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
         pressedCard = key
         try { tap() } finally { pressedCard = null }
     }
+    /** The page a card was on, by the page it opened (kept like [cardOf]); none when the card was on the tabs page. */
+    private val cardPage = HashMap<String, String>()
     fun cardKeyOf(screen: Screen?): String? = screen?.let { cardOf[it.toString()] }
+    fun cardPageOf(screen: Screen?): String? = screen?.let { cardPage[it.toString()] }
 
     fun open(screen: Screen) {
         val key = pressedCard?.takeIf { screen != Screen.EditHome && screen != Screen.EditProfile && screen != Screen.Active }
         if (key != null) cardOf[screen.toString()] = key else cardOf.remove(screen.toString())
+        val under = stack.lastOrNull()
+        if (key != null && under != null) cardPage[screen.toString()] = under.toString() else cardPage.remove(screen.toString())
         stack.add(screen)
     }
     fun back() { stack.removeLastOrNull() }

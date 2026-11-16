@@ -107,7 +107,7 @@ fun PersonalBestsScreen(model: AppModel) {
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.m),
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(lift.name)
+                            MorphText(androidx.compose.ui.text.AnnotatedString(lift.name), "pr:name", onPage = true, id = lift.name)
                             Text(set, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             // Done left and right: each side's own best under the weaker side's.
                             if (lift.sided) {

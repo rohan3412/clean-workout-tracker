@@ -219,7 +219,7 @@ private fun TodayBody(model: AppModel, caption: String, template: Template, reas
         val colors by model.templateColors.collectAsState()
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
             colors.ofId(template.id)?.let { TemplateDot(it, size = 12.dp) }
-            Text(template.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            MorphText(androidx.compose.ui.text.AnnotatedString(template.name), "title", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         }
         val workouts by model.workouts.collectAsState()
         val estimate = remember(workouts, template.name) { clean.core.templateDurations(workouts)[template.name] }

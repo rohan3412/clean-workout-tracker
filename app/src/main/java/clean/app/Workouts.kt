@@ -87,6 +87,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.dp
 import clean.core.LoadType
 import clean.core.NoteItem
@@ -136,8 +137,10 @@ fun HistoryScreen(model: AppModel) {
         IconButton(onClick = { searching = !searching; if (!searching) query = "" }) { Icon(if (searching) CleanIcons.Close else CleanIcons.Search, "Search history") }
         IconButton(onClick = { model.open(Screen.Calendar()) }) { Icon(CleanIcons.Calendar, "Calendar") }
     }
+    val listState = rememberLazyListState()
     Scaffold(containerColor = pageContainer(), topBar = { BackBar("History", model::back, actions) }) { padding ->
-    LazyColumn(Modifier.padding(padding).fillMaxSize()) {
+    Box(Modifier.padding(padding).fillMaxSize()) {
+    LazyColumn(Modifier.fillMaxSize(), listState) {
         if (searching) item {
             OutlinedTextField(query, { query = it }, placeholder = { Text("Workout, exercise or note") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = Space.l))
         }
@@ -153,12 +156,43 @@ fun HistoryScreen(model: AppModel) {
             items(list, key = { it.date }) { workout ->
                 // settings and bodyweight are keys only so the volume is worked out again when they change.
                 val volume = remember(workout, settings, bodyweight) { volumeOf(workout, model::loadOf) }
-                Box { WorkoutCard(workout, model, volume, recordCount(workout, prs[workout.date].orEmpty()), snippets[workout.date]) }
+                // The card opens its workout's page as a container that grows out of it (a page card, see [LocalCardKey]).
+                androidx.compose.runtime.CompositionLocalProvider(LocalCardKey provides "page:history:${workout.date}") {
+                    Box { WorkoutCard(workout, model, volume, recordCount(workout, prs[workout.date].orEmpty()), snippets[workout.date]) }
+                }
             }
         }
         item { Spacer(Modifier.height(Space.xxl)) }
     }
+    if (LocalPageCard.current == "progress:history") RowsBelow(listState, workouts)
     }
+    }
+}
+
+/**
+ * The page's half of the History card's rows that travel below the bottom of the screen while the card opens (the rows whose cards are
+ * further down the list than is laid out): each row of the card has a place here, one card's height and gap further on than the one
+ * before it, starting under the last card that is laid out, and the row moves there as the container grows (and back up on Back).
+ * Empty boxes: they only say where. The rows whose cards are on the screen are matched through their own texts and badges.
+ */
+@Composable
+private fun RowsBelow(state: androidx.compose.foundation.lazy.LazyListState, workouts: List<Workout>) {
+    val texts = LocalMorphTexts.current ?: return
+    val prefix = "progress:history/row:name/"
+    val dates = texts.keys.filter { it.startsWith(prefix) && it.endsWith("/card") }.map { it.removePrefix(prefix).removeSuffix("/card") }
+    val order = remember(workouts) { workouts.asReversed().withIndex().associate { it.value.date to it.index } }
+    for (date in dates) Box(
+        Modifier.layout { measurable, constraints ->
+            fun at(key: Any) = (key as? String)?.let { order[it] }
+            val seen = state.layoutInfo.visibleItemsInfo.filter { at(it.key) != null }
+            val last = seen.maxByOrNull { at(it.key)!! }
+            val step = last?.size ?: 96.dp.roundToPx()
+            val further = ((order[date] ?: 0) - (last?.let { at(it.key)!! } ?: -1)).coerceAtLeast(1)
+            val margin = Space.m.roundToPx()
+            val body = measurable.measure(androidx.compose.ui.unit.Constraints.fixed((constraints.maxWidth - 2 * margin).coerceAtLeast(0), 24.dp.roundToPx()))
+            layout(body.width, body.height) { body.place(margin, (last?.let { it.offset + it.size } ?: 0) + (further - 1) * step) }
+        }.morphs("row:out", date, late = true),
+    )
 }
 
 /**
@@ -254,18 +288,36 @@ fun WorkoutCard(workout: Workout, model: AppModel, volume: Double, records: Doub
         }
     }
     val hasOneRm = estimates.any { it != null }
+    // The cards whose rows travel to these: Progress's History card, or Home's Recent workouts card (name and date only, it has no PR count).
+    val fromRow = LocalPageCard.current.let { it == "progress:history" || it == "home:recentworkouts" }
+    // On the History page the card is also a page card (its own key): while the change to its workout's page runs, its name is the card's
+    // title; at all other times it stays what the History card's rows travel to, ready for Back to that card.
+    val pageCard = LocalCardKey.current?.takeIf { isPageKey(it) }
+    val rowMode = fromRow && !(pageCard != null && LocalPageMorphing.current.invoke())
+    // A row's side of the History card's change has no card key of its own, whatever card the page's card is.
+    @Composable fun asRow(content: @Composable () -> Unit) {
+        if (rowMode && pageCard != null) androidx.compose.runtime.CompositionLocalProvider(LocalCardKey provides null) { content() } else content()
+    }
     Section("", onClick = { model.open(Screen.WorkoutDetail(workout.date)) }, spacing = Space.s) {
         Column {
             // Nothing inside the card takes a tap of its own: the lines are too small to aim at, so the whole card opens the workout.
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 colors.ofName(workout.name)?.let { TemplateDot(it) }
-                MorphText(androidx.compose.ui.text.AnnotatedString(workout.name), "title", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (records > 0) Badge(prsText(records))
+                // On the History page opened from Progress's History card, the name, the PR badge and the date are what that card's rows travel to.
+                asRow { MorphText(androidx.compose.ui.text.AnnotatedString(workout.name), if (rowMode) "row:name" else "title", Modifier.weight(1f), onPage = rowMode, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, id = if (rowMode) workout.date else null) }
+                if (records > 0) asRow { Badge(prsText(records), if (rowMode) Modifier.morphs("row:prs", workout.date) else Modifier) }
             }
-            Text(
-                listOf(parseDate(workout.date)?.format(SHORT) ?: workout.date, duration(workout.durationSeconds), model.volume(volume)).joinToString("  ·  "),
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            val day = parseDate(workout.date)?.format(SHORT) ?: workout.date
+            val rest = listOf(duration(workout.durationSeconds), model.volume(volume)).joinToString("  ·  ")
+            // The line is laid out whole, as one text, with its date part drawn by the moving text laid over it: the rest of the line
+            // stays where it is (and fades in with the page) however the date's box is sized on its way.
+            if (rowMode) asRow { Box {
+                Text(
+                    buildAnnotatedString { withStyle(SpanStyle(color = Color.Transparent)) { append(day) }; append("  ·  $rest") },
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                MorphText(androidx.compose.ui.text.AnnotatedString(day), "row:date", onPage = true, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, id = workout.date)
+            } } else Text("$day  ·  $rest", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (workout.notes.isNotEmpty()) Text(workout.notes, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (snippet != null) Text(snippet, style = MaterialTheme.typography.bodySmall, fontStyle = FontStyle.Italic, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }

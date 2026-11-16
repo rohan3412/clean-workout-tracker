@@ -20,6 +20,7 @@ val SETTINGS_INDEX = listOf(
     SettingPlace("Workout", "Outside the app", "launcher shortcuts home screen icon", "s-outside"),
     SettingPlace("Workout", "Template colours", "colour dots random manual folders", "s-tplcolors"),
     SettingPlace("Workout", "During a workout", "rest length warm-up failure drop between sides background alert alarm extra hard set return summary RPE next set suggest shrink workout in progress bar banner exercise tab", "s-during"),
+    SettingPlace("Appearance", "Performance mode", "performance animations motion off fast battery reduce", "ap-performance"),
     SettingPlace("Appearance", "Presets", "theme look light dark amoled mono linen saved preset reset", "ap-preset"),
     SettingPlace("Appearance", "Mono", "paper ink texture grain negative invert", "ap-mono"),
     SettingPlace("Appearance", "Day & night", "day night automatic switch sunrise sunset times phone", "ap-daynight"),
