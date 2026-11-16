@@ -68,6 +68,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -163,7 +164,7 @@ fun MeasurementsScreen(model: AppModel) {
             val kg = latest["weight.csv"]?.value?.toDoubleOrNull()
             val height = profile?.heightCm?.takeIf { it > 0 }
             Row(
-                Modifier.fillMaxWidth().clickable { model.open(Screen.Bmi) }.padding(horizontal = Space.l, vertical = Space.l),
+                Modifier.settleIn(0).fillMaxWidth().clickable { model.open(Screen.Bmi) }.padding(horizontal = Space.l, vertical = Space.l),
                 horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("BMI", style = MaterialTheme.typography.bodyLarge)
@@ -171,11 +172,11 @@ fun MeasurementsScreen(model: AppModel) {
             }
             HorizontalDivider()
         }
-        items(files, key = { it.id }) { file ->
+        itemsIndexed(files, key = { _, f -> f.id }) { index, file ->
             val (label, fileUnit) = splitHeader(file.header)
             val last = latest[file.name]
             Row(
-                Modifier.fillMaxWidth().clickable { model.open(Screen.MeasurementDetail(file.name)) }.padding(horizontal = Space.l, vertical = Space.l),
+                Modifier.settleIn(index + 1).fillMaxWidth().clickable { model.open(Screen.MeasurementDetail(file.name)) }.padding(horizontal = Space.l, vertical = Space.l),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -738,6 +739,20 @@ fun BodyFigure(
         if (motion && way != 0 && before != null && before != layer) SlideRun(before, way) else null
     }
     LaunchedEffect(travel) { travel?.p?.animateTo(1f, Motion.viewSlide()) }
+    // After a change of colours that is not a swipe (a workout was done, the figures refreshed), each muscle eases from its old colour to the new one (Roll.kt has the same pattern for numbers).
+    var settledLayer by remember { mutableStateOf(layer) }
+    var easingTo by remember { mutableStateOf<SlideLayer?>(null) }
+    val ease = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(layer, motion) {
+        if (layer == settledLayer) return@LaunchedEffect
+        if (!motion || travel != null) { settledLayer = layer; return@LaunchedEffect }
+        easingTo = layer
+        ease.snapTo(0f)
+        ease.animateTo(1f, Motion.short())
+        settledLayer = layer
+    }
+    val easeFrom = if (layer != settledLayer && travel == null && motion) settledLayer else null
+    val easeAt = if (easeFrom != null && easingTo != layer) 0f else ease.value
     val dim by animateFloatAsState(if (open != null) 0.4f else 1f, if (motion) Motion.short() else snap(), label = "dim")
     // Gone with the figure, so it starts at normal size again when the view changes or the page is left.
     val zoom = remember { Zoom() }
@@ -846,7 +861,8 @@ fun BodyFigure(
                         } else {
                             val own = part.muscle?.let { m -> part.side?.let { sideShown[m to it] } }
                             // While the colours slide, every muscle is the grey of an untrained one and the colours are drawn over it below.
-                            val fill = part.muscle?.let { if (sliding) neutral else own ?: colors[it] ?: neutral } ?: inert
+                            val now = part.muscle?.let { if (sliding) neutral else own ?: colors[it] ?: neutral } ?: inert
+                            val fill = if (easeFrom != null && part.muscle != null && !sliding) androidx.compose.ui.graphics.lerp(part.side?.let { easeFrom.limbs[part.muscle!! to it] } ?: easeFrom.colours[part.muscle!!] ?: neutral, now, easeAt) else now
                             drawPath(part.path, if (open != null && part.muscle != null && part.muscle != open) fill.copy(alpha = fill.alpha * dim) else fill)
                         }
                     }

@@ -97,13 +97,13 @@ fun PersonalBestsScreen(model: AppModel) {
                 val shown = lifts.filter { it.name.contains(query.trim(), ignoreCase = true) }
                 if (lifts.isEmpty()) item { EmptyPreview("Log a set with weight and reps and your best lifts appear here.", modifier = Modifier.padding(Space.l)) { PreviewSamples.Rows(96.dp) } }
                 else if (shown.isEmpty()) item { Section("") { Text("No exercise matches.") } }
-                items(shown, key = { it.name }) { lift ->
+                itemsIndexed(shown, key = { _, l -> l.name }) { index, lift ->
                     val r = lift.record
                     val w = r.weight
                     val set = (if (w != null && r.reps != null) "${lift.sign}${showWeight(w, lift.unit)} ${lift.unit} × ${r.reps} · " else "") + prettyDay(r.date)
                     // The line opens the exercise on its PRs.
                     Row(
-                        Modifier.fillMaxWidth().clickable { model.open(Screen.ExerciseDetail(lift.name, tab = 3)) }.padding(horizontal = Space.l, vertical = Space.s),
+                        Modifier.settleIn(index + 1).fillMaxWidth().clickable { model.open(Screen.ExerciseDetail(lift.name, tab = 3)) }.padding(horizontal = Space.l, vertical = Space.s),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.m),
                     ) {
                         Column(Modifier.weight(1f)) {

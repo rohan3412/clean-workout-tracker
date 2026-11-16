@@ -39,6 +39,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -154,7 +157,7 @@ internal fun weightRuler(unit: String) =
 
 /**
  * A horizontal ruler under a fixed marker in the accent: a tick for each step of [spec], longer halfway between the labelled ones. Dragged, it
- * flings and settles on a tick, with a light tick of the phone for each (only with animations on). All of it is one canvas drawn
+ * flings and settles on a tick, with a light tick of the phone for each whole unit passed (only with animations on). All of it is one canvas drawn
  * from the scroll position, so there is nothing to compose per tick. For a screen reader it is a slider with an increase and a decrease.
  */
 @Composable
@@ -171,14 +174,22 @@ internal fun Ruler(value: Double, onChange: (Double) -> Unit, spec: RulerSpec) {
     val changed by rememberUpdatedState(onChange)
     // A number typed, or a step from a screen reader, moves the ruler to it.
     LaunchedEffect(value) { if (!moving && abs(pos.value - clamp(value * perUnit)) > 0.5f) pos.snapTo(clamp(value * perUnit)) }
-    // While the finger or the fling moves it, the value follows, with a tick for each one passed.
+    // While the finger or the fling moves it, the value follows, with the lightest tick of the phone for each whole unit (a kilo, a pound, a centimetre) passed;
+    // the tick setting (kv `feedback.tick`) can turn it off.
+    val haptic = LocalHapticFeedback.current
+    val tickLevel by rememberUpdatedState(viewModel<AppModel>().options.collectAsState().value["feedback.tick"] ?: "light")
     LaunchedEffect(Unit) {
         var lastTick = 0L
+        var lastWhole = Math.floorDiv(pos.value.roundToInt(), spec.perUnit)
         snapshotFlow { pos.value.roundToInt() }.collect { ticks ->
-            if (!moving) return@collect
+            val whole = Math.floorDiv(ticks, spec.perUnit)
+            if (!moving) { lastWhole = whole; return@collect }
             changed(ticks / perUnit)
             val now = SystemClock.uptimeMillis()
-            if (motion && now - lastTick > 30) { Feedback.pulse(10); lastTick = now }
+            if (whole != lastWhole) {
+                lastWhole = whole
+                if (motion && tickLevel != "off" && now - lastTick > 30) { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); lastTick = now }
+            }
         }
     }
     val drag = rememberDraggableState { delta -> scope.launch { pos.snapTo(pos.value - delta / step) } }
@@ -204,8 +215,10 @@ internal fun Ruler(value: Double, onChange: (Double) -> Unit, spec: RulerSpec) {
             onDragStopped = { velocity ->
                 if (motion) {
                     pos.animateDecay(-velocity / step, exponentialDecay(frictionMultiplier = 1.5f))
-                    pos.animateTo(pos.value.roundToInt().toFloat(), Motion.quick())
+                    // Coasts, then settles exactly on a step of the ruler.
+                    pos.animateTo(pos.value.roundToInt().toFloat(), Motion.follow())
                 } else pos.snapTo(pos.value.roundToInt().toFloat())
+                changed(pos.value.roundToInt() / perUnit)
                 moving = false
             },
         ),

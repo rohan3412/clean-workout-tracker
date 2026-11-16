@@ -537,9 +537,10 @@ fun SheetGap() {
  * is under way nothing beneath it gets a tap from the same touch. A second finger cancels it.
  */
 @Composable
-fun Modifier.swipeSteps(onPrevious: () -> Unit, onNext: () -> Unit): Modifier {
+fun Modifier.swipeSteps(onPrevious: () -> Unit, onNext: () -> Unit, follow: ((Float?) -> Unit)? = null): Modifier {
     val previous by rememberUpdatedState(onPrevious)
     val next by rememberUpdatedState(onNext)
+    val following by rememberUpdatedState(follow)
     return pointerInput(Unit) {
         val slop = viewConfiguration.touchSlop
         val far = 56.dp.toPx()
@@ -551,7 +552,7 @@ fun Modifier.swipeSteps(onPrevious: () -> Unit, onNext: () -> Unit): Modifier {
             while (true) {
                 val event = awaitPointerEvent()
                 // A second finger makes it a pinch, not a swipe.
-                if (event.changes.count { it.pressed } > 1) return@awaitEachGesture
+                if (event.changes.count { it.pressed } > 1) { if (mine) following?.invoke(null); return@awaitEachGesture }
                 val change = event.changes.firstOrNull { it.id == down.id } ?: break
                 if (!mine && change.isConsumed) return@awaitEachGesture
                 val moved = change.positionChange()
@@ -559,9 +560,12 @@ fun Modifier.swipeSteps(onPrevious: () -> Unit, onNext: () -> Unit): Modifier {
                 dy += moved.y
                 if (!mine && abs(dx) > slop && abs(dx) > 1.5f * abs(dy)) mine = true
                 if (mine) change.consume()
+                // Whoever asked sees the swipe as it goes (the distance so far), and null once it is over, after any step.
+                if (mine) following?.invoke(dx)
                 if (!change.pressed) break
             }
             if (mine && abs(dx) > far) if (dx < 0) next() else previous()
+            if (mine) following?.invoke(null)
         }
     }
 }

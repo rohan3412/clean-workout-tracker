@@ -317,6 +317,14 @@ fun CalendarScreen(model: AppModel, selected: String?) {
     var open by remember { mutableStateOf<LocalDate?>(null) }
     val state = rememberLazyListState(initialFirstVisibleItemIndex = (marked?.let { months.indexOf(YearMonth.from(it)) }?.takeIf { it >= 0 } ?: months.lastIndex).coerceAtLeast(0))
     val empty = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+    // The squares come in from the top left the first time this page opens in a session; not when it grew out of the Activity card, which
+    // already moves it (that first time is used up too). Each square's diagonal counts from the month the page opens on (Roll.kt).
+    val wave = rememberWave("calendar", true, skip = LocalPageCard.current != null)
+    val firstMonth = remember { state.firstVisibleItemIndex }
+    val rowsBefore = remember(months, today) {
+        var sum = 0
+        months.map { m -> val here = sum; sum += 1 + (m.atDay(1).dayOfWeek.value - 1 + (if (m == YearMonth.from(today)) today.dayOfMonth else m.lengthOfMonth()) + 6) / 7; here }
+    }
     logging?.let { day ->
         var time by remember(day) { mutableStateOf("18:00") }
         var minutes by remember(day) { mutableStateOf("60") }
@@ -362,18 +370,19 @@ fun CalendarScreen(model: AppModel, selected: String?) {
                         for (d in "MTWTFSS") Text(d.toString(), Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (weekTotals) Spacer(Modifier.width(54.dp))
                     }
-                    // Monday first; blanks before the 1st and after the last day fill the weeks out.
-                    val cells: List<LocalDate?> = List(month.atDay(1).dayOfWeek.value - 1) { null } + (1..month.lengthOfMonth()).map { month.atDay(it) }
-                    for (week in cells.chunked(7)) {
+                    // Monday first; blanks before the 1st fill the first week out, and the last cell is today: no day after it is drawn.
+                    val cells: List<LocalDate?> = List(month.atDay(1).dayOfWeek.value - 1) { null } + (1..month.lengthOfMonth()).map { month.atDay(it) }.filter { it <= today }
+                    val monthAt = rowsBefore[months.indexOf(month).coerceAtLeast(0)] - rowsBefore.getOrElse(firstMonth) { 0 } + 1
+                    for ((row, week) in cells.chunked(7).withIndex()) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            for (day in week) {
+                            for ((col, day) in week.withIndex()) {
                                 if (day == null) { Spacer(Modifier.weight(1f)); continue }
                                 val value = seconds[day] ?: 0.0
                                 val share = if (top > low) ((value - low).toDouble() / (top - low)).coerceIn(0.0, 1.0) else 1.0
                                 // shade() takes a square root, which is undone here: this scale is already spread out.
                                 val color = if (value <= 0) empty else shade(palette, share * share)
                                 Box(
-                                    Modifier.weight(1f).aspectRatio(1f).padding(Space.xxs).background(color, SmallShape)
+                                    Modifier.weight(1f).aspectRatio(1f).waved(wave, monthAt + row + col).padding(Space.xxs).background(color, SmallShape)
                                         .border(if (day == marked) 2.5.dp else 0.dp, if (day == marked) MaterialTheme.colorScheme.onSurface else Color.Transparent, SmallShape)
                                         // A tap shows the day; holding it adds a workout that was not logged at the time.
                                         .combinedClickable(enabled = day <= today, onClick = { open = day }, onLongClick = { logging = day }),
@@ -806,16 +815,17 @@ fun SummaryScreen(model: AppModel, date: String) {
 }
 
 /**
- * What a finished workout earned: the ring completing for a week's target, a badge scaling in, a shield, one line
+ * What a finished workout earned: the ring completing for a week's target, a badge flipping in like a coin, a shield, one line
  * each. It opens the trophies. Still, and silent, when animations are off.
  */
 @Composable
 private fun CelebrationBlock(model: AppModel, earned: Earned) {
     val motion = LocalMotion.current
-    val pop = remember { Animatable(if (motion) 0f else 1f) }
-    LaunchedEffect(Unit) { if (motion) pop.animateTo(1f, Motion.reward()) }
+    // A badge, shield or streak just earned flips in like a coin, once.
+    val flip = remember { Animatable(if (motion) 0f else 1f) }
+    LaunchedEffect(Unit) { if (motion) flip.animateTo(1f, Motion.coin()) }
     val accent = MaterialTheme.colorScheme.primary
-    val scaled = Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value }
+    val scaled = Modifier.coin { flip.value }
     androidx.compose.runtime.CompositionLocalProvider(LocalCardKey provides "page:summary:celebration") { Section("", onClick = { model.open(Screen.Trophies) }) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.l)) {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {

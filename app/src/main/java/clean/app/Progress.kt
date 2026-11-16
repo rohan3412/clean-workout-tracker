@@ -59,6 +59,7 @@ import clean.core.totalsIn
 import clean.core.volumeBuckets
 import clean.core.volumeOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
@@ -229,21 +230,46 @@ private fun VolumeBars(buckets: List<VolumeBucket>, spoken: String) {
     val color = MaterialTheme.colorScheme.primary
     val quiet = color.copy(alpha = 0.35f)
     val faint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
-    val max = buckets.maxOf { it.volume }
+    // Another period stretches the bars: each grows or shrinks to its new height while it slides into its new slot (Motion.STRETCH).
+    val motion = LocalMotion.current
+    var settled by remember { mutableStateOf(buckets) }
+    var running by remember { mutableStateOf<List<VolumeBucket>?>(null) }
+    val progress = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(buckets, motion) {
+        if (buckets == settled || !motion) { settled = buckets; return@LaunchedEffect }
+        running = buckets
+        progress.snapTo(0f)
+        progress.animateTo(1f, Motion.stretch())
+        settled = buckets
+    }
+    val before = if (motion && buckets != settled) settled else null
+    val t = if (before != null && running != buckets) 0f else progress.value
     Spacer(
         Modifier.fillMaxWidth().height(80.dp).semantics { contentDescription = spoken }.drawWithCache {
-            val slot = size.width / buckets.size
-            val gap = slot * if (buckets.size > 14) 0.25f else 0.3f
             val stub = 3.dp.toPx()
+            fun height(list: List<VolumeBucket>, i: Int): Float {
+                val b = list.getOrNull(i) ?: return 0f
+                val max = list.maxOf { it.volume }
+                return if (b.future || b.volume <= 0.0 || max <= 0.0) stub else maxOf(stub, (b.volume / max).toFloat() * size.height)
+            }
+            fun slot(list: List<VolumeBucket>) = size.width / list.size
+            fun gap(list: List<VolumeBucket>) = slot(list) * if (list.size > 14) 0.25f else 0.3f
+            fun mix(a: Float, b: Float) = a + (b - a) * t
             onDrawBehind {
-                buckets.forEachIndexed { i, b ->
-                    val h = if (b.future || b.volume <= 0.0 || max <= 0.0) stub else maxOf(stub, (b.volume / max).toFloat() * size.height)
+                val old = before ?: buckets
+                for (i in 0 until maxOf(old.size, buckets.size)) {
+                    val now = buckets.getOrNull(i)
+                    val b = now ?: old[i]
+                    // A bar with no place on one side starts from, or goes down to, nothing, at the slot it would have.
+                    val h = mix(if (before == null) height(buckets, i) else height(old, i), height(buckets, i))
+                    val s = mix(slot(old), slot(buckets))
+                    val g = mix(gap(old), gap(buckets))
                     val tone = when {
                         b.current -> color
                         b.future || b.volume <= 0.0 -> faint
                         else -> quiet
                     }
-                    drawRect(tone, Offset(i * slot + gap / 2, size.height - h), Size(slot - gap, h))
+                    drawRect(tone, Offset(i * s + g / 2, size.height - h), Size((s - g).coerceAtLeast(0f), h))
                 }
             }
         },

@@ -26,6 +26,13 @@ import clean.core.roundsText
 import clean.core.sentence
 import clean.core.sidesLine
 import clean.core.sidesSpoken
+import kotlin.math.roundToInt
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.material3.TabPosition
+import kotlin.math.abs
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -587,6 +594,23 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
     val notes = remember(workouts, name) {
         workouts.reversed().flatMap { w -> w.blocks.filter { it.exercise == name }.flatMap { b -> b.notes.filter { it.text.isNotBlank() }.map { w.date to it.text } } }
     }
+    // The tabs' underline glides and stretches between tabs and follows a swipe, and the content slides with the finger (Motion.pill, Motion.slide).
+    val motion = LocalMotion.current
+    val scope = rememberCoroutineScope()
+    var drag by remember { mutableStateOf<Float?>(null) }
+    var width by remember { androidx.compose.runtime.mutableIntStateOf(1) }
+    val slide = remember { androidx.compose.animation.core.Animatable(0f) }
+    val stepped = remember { BooleanArray(1) }
+    val underline = rememberStretch(tab) { drag?.let { (tab - it / width).coerceIn(0f, EXERCISE_TABS.lastIndex.toFloat()) } }
+    var shown by remember { androidx.compose.runtime.mutableIntStateOf(tab) }
+    LaunchedEffect(tab) {
+        if (tab == shown) return@LaunchedEffect
+        val dir = if (tab > shown) 1 else -1
+        shown = tab
+        if (!motion) { slide.snapTo(0f); return@LaunchedEffect }
+        slide.snapTo(dir * width / 3f)
+        slide.animateTo(0f, Motion.slide())
+    }
     Scaffold(containerColor = pageContainer(), topBar = {
       Column {
         RegisterSheetBar(48.dp)
@@ -599,7 +623,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
             // Editing happens on the Info tab.
             QuietButton(if (editing) "Done" else "Edit", { editing = !editing; if (editing) current = INFO }, Modifier.padding(end = Space.s), contentPadding = PaddingValues(horizontal = Space.l, vertical = Space.s))
         }
-        TabRow(selectedTabIndex = tab) {
+        TabRow(selectedTabIndex = tab, indicator = { positions -> StretchIndicator(underline, positions) }) {
             EXERCISE_TABS.forEachIndexed { i, title -> Tab(selected = tab == i, onClick = { editing = false; current = i; if (startTab == null) model.setOption("ui.exerciseTab", i.toString()) }, text = { Text(title) }) }
         }
       }
@@ -607,20 +631,50 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
         // A sideways swipe goes to the tab before or after.
         fun select(i: Int) {
             if (i !in EXERCISE_TABS.indices) return
+            stepped[0] = true
             editing = false
             current = i
             if (startTab == null) model.setOption("ui.exerciseTab", i.toString())
         }
-        LazyColumn(Modifier.padding(padding).fillMaxSize().swipeSteps(onPrevious = { select(tab - 1) }, onNext = { select(tab + 1) }), state = listState) {
+        // Opening a tab of the page settles its first cards in, as a page does; the tab the page opened on is the page's own (Roll.kt).
+        val firstTab = remember { tab }
+        val tabSettle = remember(tab) { if (tab == firstTab) null else SettleState(armed = true) }
+        LaunchedEffect(tabSettle) { if (tabSettle != null) { kotlinx.coroutines.delay(Motion.settleWindowMillis()); tabSettle.armed = false } }
+        androidx.compose.runtime.CompositionLocalProvider(LocalSettle provides (tabSettle ?: LocalSettle.current)) {
+        LazyColumn(
+            Modifier.padding(padding).fillMaxSize().onSizeChanged { width = it.width.coerceAtLeast(1) }
+                .swipeSteps(onPrevious = { select(tab - 1) }, onNext = { select(tab + 1) }, follow = { dx ->
+                    // The content goes with the finger (less where there is no tab to go to); letting go without a step brings it back.
+                    if (dx != null) {
+                        if (drag == null) stepped[0] = false
+                        drag = dx
+                    } else {
+                        val d = drag ?: 0f
+                        drag = null
+                        if (motion && d != 0f) scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                            // A step brings the next tab's content in from the side it is going; no step brings this one back to rest.
+                            if (stepped[0]) { slide.snapTo(if (d < 0f) width / 3f else -width / 3f); slide.animateTo(0f, Motion.slide()) }
+                            else { slide.snapTo(sideward(d, tab)); slide.animateTo(0f, Motion.follow()) }
+                        }
+                    }
+                })
+                .graphicsLayer {
+                    if (!motion) return@graphicsLayer
+                    val off = drag?.let { sideward(it, tab) } ?: slide.value
+                    translationX = off
+                    alpha = 1f - (abs(off) / (width / 3f)).coerceIn(0f, 1f) * 0.8f
+                },
+            state = listState,
+        ) {
             if (tab == INFO && editing) {
                 item {
-                    Section("How this exercise is logged") {
+                    Section("How this exercise is logged", Modifier.settleNext()) {
                         Choice(LoadType.entries, loadType, ::loadTypeLabel) { type -> model.putSetting(name) { it.copy(loadType = type.name) } }
                         Choice(listOf(null, "kg", "lb"), settings[name]?.unit, { it ?: "Profile unit" }) { u -> model.putSetting(name) { it.copy(unit = u) } }
                     }
                 }
                 item {
-                    Section("Goal") {
+                    Section("Goal", Modifier.settleNext()) {
                         Text("A set to work towards. The Info tab then shows how close your best estimated 1RM is to it. Leave both empty for none.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         var goalWeight by remember { mutableStateOf(goal?.first?.let { entryWeight(it, unit) }.orEmpty()) }
                         var goalReps by remember { mutableStateOf(goal?.second?.toString().orEmpty()) }
@@ -637,7 +691,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                     }
                 }
                 item {
-                    Section("Muscles") {
+                    Section("Muscles", Modifier.settleNext()) {
                         Text("Tap a muscle to step it through main (a full set), supporting (half), minor (a quarter) and off.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                             for (muscle in Muscle.entries) {
@@ -665,7 +719,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                     }
                 }
                 item {
-                    Section("Variations") {
+                    Section("Variations", Modifier.settleNext()) {
                         Text(
                             "Exercises grouped here are variations of one overall exercise. Each keeps its own history and PRs, and a workout can switch between them from the exercise's options.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -677,7 +731,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                     }
                 }
                 item {
-                    Section("Name") {
+                    Section("Name", Modifier.settleNext()) {
                         Text(
                             "Two names for one exercise, or a typo: change the name on every set logged under it, or merge it into the exercise it should have been. It can be undone from Settings, Data.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -719,7 +773,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                 if (variations.size > 1) {
                     item {
                         // The roll-up: every variation of the overall exercise with its best estimated 1RM.
-                        Section("Variations of ${model.overallOf(name)}") {
+                        Section("Variations of ${model.overallOf(name)}", Modifier.settleNext()) {
                             LabelValue("All variations together", "history and charts ›") { model.open(Screen.Overall(name)) }
                             // The ones that have been done, with their best; the rest of the built-in ones on request.
                             val done = variations.filter { it == name || model.hasHistory(it) }
@@ -748,7 +802,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                     }
                 }
                 item {
-                    Section("") {
+                    Section("", Modifier.settleNext()) {
                         // Other names the exercise goes by, in other apps or in the gym; search finds it under these too.
                         val others = otherNames(name)
                         if (others.isNotEmpty()) {
@@ -786,7 +840,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                 }
                 if (goal != null) item {
                     val (kg, reps) = goal
-                    Section("Goal") {
+                    Section("Goal", Modifier.settleNext()) {
                         LabelValue("Working towards", "$sign${weight(kg)} × $reps")
                         goalReached?.let { day -> LabelValue("Reached on", prettyDay(day) + " ›") { model.open(Screen.WorkoutDetail(day)) } }
                         if (reps > rule.maxReps) {
@@ -818,13 +872,13 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                     }
                 }
                 if (plateau && stalled(progress)) item {
-                    Section("Stalled") {
+                    Section("Stalled", Modifier.settleNext()) {
                         Text("None of the last five sessions set a new best estimated 1RM. A change of reps, weight or variation may get it moving.", color = MaterialTheme.colorScheme.tertiary)
                     }
                 }
                 if (notes.isNotEmpty()) item {
                     // Every note written on this exercise, newest first; each opens its workout.
-                    Section("Notes") { for ((date, text) in notes.take(40)) LinkRow(text, prettyDay(date), "") { model.open(Screen.WorkoutDetail(date)) } }
+                    Section("Notes", Modifier.settleNext()) { for ((date, text) in notes.take(40)) LinkRow(text, prettyDay(date), "") { model.open(Screen.WorkoutDetail(date)) } }
                 }
             }
             if (tab == CHARTS) item { Box {
@@ -850,7 +904,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                 var range by remember { mutableStateOf(0L) }
                 // The imbalance chart is offered once a session has both sides to compare; it is not part of "All".
                 val hasImbalance = remember(sideProgress) { imbalanceSeries(sideProgress) != null }
-                Section("Progress") {
+                Section("Progress", Modifier.settleNext()) {
                   if (sessions.size < 2) EmptyPreview("Log ${2 - sessions.size} more ${if (sessions.isEmpty()) "sessions" else "session"} of $name to see its chart.") { PreviewSamples.Line() }
                   else {
                     Choice(listOf(-1) + charts.indices + (if (hasImbalance) listOf(IMBALANCE_CHART) else emptyList()), chart, { if (it == IMBALANCE_CHART) "Imbalance" else if (it < 0) "All" else charts[it].first }) { chart = it }
@@ -882,7 +936,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                 }
             } }
             if (tab == PRS) item {
-                Section("PRs") {
+                Section("PRs", Modifier.settleNext()) {
                     if (sessions.isEmpty()) Text("Not logged yet.")
                     line(
                         when (loadType) {
@@ -909,7 +963,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
             }
             if (tab == PRS && records.repsAtWeight.isNotEmpty()) {
                 item {
-                    Section("Best reps at each weight") {
+                    Section("Best reps at each weight", Modifier.settleNext()) {
                         for (r in records.repsAtWeight) {
                             LabelValue(weight(r.weight ?: 0.0), "${r.reps} reps · ${prettyDay(r.date)}") { model.open(Screen.WorkoutDetail(r.date)) }
                             // Each side's own best at the weight, where the exercise has been done left and right.
@@ -925,7 +979,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
             }
             if (tab == PRS && records.longestAtWeight.isNotEmpty()) {
                 item {
-                    Section("Longest hold at each weight") {
+                    Section("Longest hold at each weight", Modifier.settleNext()) {
                         for (r in records.longestAtWeight) {
                             LabelValue(weight(r.weight ?: 0.0), "${shortNumber(r.value)} s · ${prettyDay(r.date)}") { model.open(Screen.WorkoutDetail(r.date)) }
                             if (hasSides) {
@@ -942,7 +996,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                 item {
                     // The best estimated 1RM run back through the chosen formula.
                     val best = records.estimated1Rm!!.value
-                    Section("Rep maxes") {
+                    Section("Rep maxes", Modifier.settleNext()) {
                         for (n in listOf(1, 2, 3, 5, 8, 10)) LabelValue("${n}RM", "≈ " + weight(Math.round(weightForReps(best, n, rule) * 10) / 10.0))
                         Text("Worked out from the best estimated 1RM by the ${rule.formula.label} formula.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -1003,8 +1057,27 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                 }
             }
         }
+        }
     }
     if (addingVariation) ExercisePicker(model, workouts, onPick = { model.addVariation(name, it); addingVariation = false }, onDismiss = { addingVariation = false })
     if (progressing) ProgressionDialog(model, name, unit, sessions) { progressing = false }
     if (renaming) RenameDialog(model, name) { renaming = false }
+}
+
+/** How far the content of the exercise page follows a drag of [dx] px on tab [tab]: all of it, and less where there is no tab to go to. */
+private fun sideward(dx: Float, tab: Int): Float = if ((tab == 0 && dx > 0f) || (tab == EXERCISE_TABS.lastIndex && dx < 0f)) dx * 0.3f else dx
+
+/** The tab row's underline: the same one as the default, but it glides and stretches between tabs and follows a swipe ([span], see TabStretch.kt). */
+@Composable
+private fun StretchIndicator(span: () -> Span, positions: List<TabPosition>) {
+    androidx.compose.material3.TabRowDefaults.SecondaryIndicator(
+        Modifier.layout { measurable, constraints ->
+            val s = span()
+            val left = s.left { positions[it.coerceIn(positions.indices)].left.toPx() }
+            val right = s.right { positions[it.coerceIn(positions.indices)].right.toPx() }
+            val w = (right - left).roundToInt().coerceAtLeast(0)
+            val placeable = measurable.measure(Constraints(minWidth = w, maxWidth = w, minHeight = 0, maxHeight = constraints.maxHeight))
+            layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(left.roundToInt(), constraints.maxHeight - placeable.height) }
+        },
+    )
 }

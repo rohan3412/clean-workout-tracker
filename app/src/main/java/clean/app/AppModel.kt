@@ -1237,11 +1237,17 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
     fun cardKeyOf(screen: Screen?): String? = screen?.let { cardOf[it.toString()] }
     fun cardPageOf(screen: Screen?): String? = screen?.let { cardPage[it.toString()] }
 
+    /** What the user last saw of each number, ring or mark that moves to a new value, and which calendars have waved, for this session (see Roll.kt). */
+    val seen = HashMap<String, Any?>()
+    /** Per page just pushed: whether its first rows still settle in (a page that grew out of a card does not). */
+    internal val settles = HashMap<String, SettleState>()
+
     fun open(screen: Screen) {
-        val key = pressedCard?.takeIf { screen != Screen.EditHome && screen != Screen.EditProfile && screen != Screen.Active }
+        val key = pressedCard?.takeIf { screen != Screen.EditHome && screen != Screen.EditProfile && (screen != Screen.Active || it == BANNER_CARD) }
         if (key != null) cardOf[screen.toString()] = key else cardOf.remove(screen.toString())
         val under = stack.lastOrNull()
         if (key != null && under != null) cardPage[screen.toString()] = under.toString() else cardPage.remove(screen.toString())
+        settles[screen.toString()] = SettleState(armed = key == null)
         stack.add(screen)
     }
     fun back() { stack.removeLastOrNull() }

@@ -1,6 +1,10 @@
 package clean.app
 
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.Animatable
 import clean.app.ui.theme.numbers
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -285,12 +289,14 @@ internal fun ThisWeekCard(model: AppModel, half: Boolean = false) {
     Column {
         Section("This week", onClick = { model.open(Screen.Week(monday.toString())) }) {
             val now = consistency?.now
+            // The ring and the days show the week as the user last saw it until the card is in view, then fill from there (Roll.kt).
+            val seenCount = rememberSeen(if (now != null) "week:count" else null, now?.count ?: 0)
             // Half width has no room beside the ring: the words go under it, and the seven days and the program are left to the wide card.
             val body: @Composable () -> Unit = {
                 // The ring fills toward the weekly target; it opens the trophies.
-                if (now != null) ProgressRing(now.count.toFloat() / now.target, Modifier.size(72.dp).clip(CircleShape).clickable(onClickLabel = "Open trophies") { model.open(Screen.Trophies) }.semantics { contentDescription = "${now.count} of ${now.target} workouts this week" }) {
+                if (now != null) ProgressRing(seenCount.shown.toFloat() / now.target, Modifier.size(72.dp).then(seenCount.spot).clip(CircleShape).clickable(onClickLabel = "Open trophies") { model.open(Screen.Trophies) }.semantics { contentDescription = "${now.count} of ${now.target} workouts this week" }) {
                     if (now.met) Icon(CleanIcons.Star, "Target hit", Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary)
-                    else Text("${now.count} / ${now.target}", fontWeight = FontWeight.Bold)
+                    else RollingText("${seenCount.shown} / ${now.target}", null, androidx.compose.material3.LocalTextStyle.current, fontWeight = FontWeight.Bold)
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(Space.xxs)) {
                     if (now != null) Text(if (now.met) "Target hit" else "${now.target - now.count} to go", fontWeight = FontWeight.Bold, color = if (now.met) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
@@ -319,25 +325,38 @@ internal fun ThisWeekCard(model: AppModel, half: Boolean = false) {
 private fun WeekDays(model: AppModel, monday: LocalDate, week: List<Workout>) {
     val today = LocalDate.now()
     val accent = MaterialTheme.colorScheme.primary
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+    // The days trained, as the user last saw them until the card is in view: a day done since fills then, with a small pop (Roll.kt).
+    val trainedDays = (0 until 7).filter { i -> week.any { it.day == monday.plusDays(i.toLong()).toString() } }.joinToString(",")
+    val seen = rememberSeen("week:days:$monday", trainedDays)
+    val motion = LocalMotion.current
+    Row(Modifier.fillMaxWidth().then(seen.spot), horizontalArrangement = Arrangement.SpaceBetween) {
         for (i in 0 until 7) {
             val day = monday.plusDays(i.toLong())
             val done = week.filter { it.day == day.toString() }
             val trained = done.isNotEmpty()
+            val shownTrained = seen.shown.split(',').contains(i.toString())
             val future = day.isAfter(today)
             val name = day.format(DateTimeFormatter.ofPattern("EEEE d MMMM"))
+            // The fill comes in on the short curve, and a day newly done pops once on the reward spring.
+            val fill by animateFloatAsState(if (shownTrained) 1f else 0f, if (motion) Motion.short() else snap(), label = "day fill")
+            val pop = remember { Animatable(1f) }
+            var was by remember { mutableStateOf(shownTrained) }
+            LaunchedEffect(shownTrained, motion) {
+                if (shownTrained && !was && motion) { pop.snapTo(0.6f); pop.animateTo(1f, Motion.reward()) }
+                was = shownTrained
+            }
             Box(
-                Modifier.size(36.dp).reach().clip(CircleShape)
+                Modifier.size(36.dp).reach().graphicsLayer { scaleX = pop.value; scaleY = pop.value }.clip(CircleShape)
                     .then(if (trained) Modifier.clickable(onClickLabel = "Open $name") { model.open(if (done.size == 1) Screen.WorkoutDetail(done.first().date) else Screen.Calendar(day.toString())) } else Modifier)
-                    .background(if (trained) accent else Color.Transparent, CircleShape)
-                    .then(if (day == today && !trained) Modifier.border(2.dp, accent, CircleShape) else Modifier)
+                    .background(accent.copy(alpha = accent.alpha * fill), CircleShape)
+                    .then(if (day == today && !shownTrained) Modifier.border(2.dp, accent, CircleShape) else Modifier)
                     .semantics(mergeDescendants = true) { contentDescription = "$name, ${if (trained) "trained" else if (day == today) "today" else if (future) "to come" else "rest"}" },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     day.dayOfWeek.getDisplayName(TextStyle.NARROW, Locale.getDefault()), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
                     color = when {
-                        trained -> MaterialTheme.colorScheme.onPrimary
+                        shownTrained -> MaterialTheme.colorScheme.onPrimary
                         day == today -> accent
                         future -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -381,7 +400,10 @@ internal fun ActivityCard(model: AppModel) {
         // A day opens the full calendar at that day.
         val colors by model.templateColors.collectAsState()
         val dots = remember(workouts, colors) { dayTemplateColors(workouts, colors) }
-        Calendar(values, today, first, palette, scroll, dots) { day -> model.open(Screen.Calendar(day.toString())) }
+        // The squares come in from the top left the first time the card is in view in a session (Roll.kt).
+        val spot = rememberSpot()
+        val wave = rememberWave("activity", spot.visible)
+        Box(spot.modifier) { Calendar(values, today, first, palette, scroll, dots, wave) { day -> model.open(Screen.Calendar(day.toString())) } }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
             Text("Less ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             for (color in listOf(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)) + palette) {
@@ -483,7 +505,7 @@ internal fun Tile(
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xxs)) {
                     Caption(label, role = "title")
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        FitValue(value, MaterialTheme.typography.headlineMedium.numbers(), if (tap != null) valueRole else null)
+                        FitValue(value, MaterialTheme.typography.headlineMedium.numbers(), if (tap != null) valueRole else null, "tile:${LocalCardKey.current ?: ""}:$label")
                         if (icon != null) Icon(icon, "Shield held", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                     }
                     if (second != null) Text(second, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -516,21 +538,29 @@ internal fun Tile(
  * pounds), it steps down in size, to no less than 70 %, instead of wrapping onto a second line. Nothing is drawn until it fits.
  */
 @Composable
-private fun FitValue(text: String, style: androidx.compose.ui.text.TextStyle, role: String? = null) {
+private fun FitValue(text: String, style: androidx.compose.ui.text.TextStyle, role: String? = null, rollKey: String? = null) {
+    // A figure that changed while its card was away shows the old one until the card is seen, then its digits roll to the new (Roll.kt).
+    val seen = rememberSeen(rollKey, text)
+    val text = seen.shown
     var scale by remember(text, style) { mutableStateOf(1f) }
     var fits by remember(text, style) { mutableStateOf(false) }
     val light = LocalLook.current.lightNumbers
     // Linen: a light 34 sp figure with its unit small and muted beside it.
     val shown = if (light) style.copy(fontSize = style.fontSize * (34f / 28f), fontWeight = FontWeight.Light) else style
     val words = if (light) withUnit(text, MaterialTheme.colorScheme.onSurfaceVariant) else androidx.compose.ui.text.AnnotatedString(text)
+    val roll = rememberRoll(words)
+    val rolling = roll.from != null
     val onLayout: (androidx.compose.ui.text.TextLayoutResult) -> Unit = { if (it.hasVisualOverflow && scale > 0.7f) scale -= 0.05f else fits = true }
-    if (role != null) MorphText(
-        words, role, Modifier.drawWithContent { if (fits) drawContent() }, style = shown.copy(fontSize = shown.fontSize * scale), fontWeight = if (light) FontWeight.Light else FontWeight.SemiBold,
-        maxLines = 1, softWrap = false, onTextLayout = onLayout,
-    ) else Text(
-        words, Modifier.drawWithContent { if (fits) drawContent() }, style = shown.copy(fontSize = shown.fontSize * scale), fontWeight = if (light) FontWeight.Light else FontWeight.SemiBold,
-        maxLines = 1, softWrap = false, onTextLayout = onLayout,
-    )
+    Box(seen.spot) {
+        if (role != null) MorphText(
+            words, role, Modifier.drawWithContent { if (fits && !rolling) drawContent() }, style = shown.copy(fontSize = shown.fontSize * scale), fontWeight = if (light) FontWeight.Light else FontWeight.SemiBold,
+            maxLines = 1, softWrap = false, onTextLayout = onLayout,
+        ) else Text(
+            words, Modifier.drawWithContent { if (fits && !rolling) drawContent() }, style = shown.copy(fontSize = shown.fontSize * scale), fontWeight = if (light) FontWeight.Light else FontWeight.SemiBold,
+            maxLines = 1, softWrap = false, onTextLayout = onLayout,
+        )
+        roll.from?.let { RollOverlay(it, words, roll.progress, shown.copy(fontSize = shown.fontSize * scale), if (light) FontWeight.Light else FontWeight.SemiBold) }
+    }
 }
 
 /** `102.5 kg` as the figure and, after it, its unit at 45 % of the size in [muted]; text that does not end in a plain word is returned as it is. */
@@ -614,7 +644,7 @@ internal fun Sparkline(values: List<Double>, modifier: Modifier = Modifier, edge
  * (and the fling it started) a chart left in the past glides back to the present, unless animations are off.
  */
 @Composable
-private fun Calendar(values: Map<LocalDate, Double>, today: LocalDate, first: LocalDate?, palette: List<Color>, scroll: ScrollState, dots: Map<LocalDate, Int> = emptyMap(), onTap: (LocalDate) -> Unit) {
+private fun Calendar(values: Map<LocalDate, Double>, today: LocalDate, first: LocalDate?, palette: List<Color>, scroll: ScrollState, dots: Map<LocalDate, Int> = emptyMap(), wave: Animatable<Float, androidx.compose.animation.core.AnimationVector1D>? = null, onTap: (LocalDate) -> Unit) {
     val tap by rememberUpdatedState(onTap)
     val thisMonday = weekStart(today)
     val weeks = maxOf(WEEKS, first?.let { ChronoUnit.WEEKS.between(weekStart(it), thisMonday).toInt() + 1 } ?: 0)
@@ -678,15 +708,18 @@ private fun Calendar(values: Map<LocalDate, Double>, today: LocalDate, first: Lo
                         val date = monday.plusDays(day.toLong())
                         if (date > today) continue
                         val value = values[date] ?: 0.0
-                        val color = if (value <= 0 || max <= 0) empty else palette[(ceil(value / max * 4).toInt() - 1).coerceIn(0, 3)]
-                        val origin = Offset(week * c + gap / 2, top + day * c + gap / 2)
-                        val box = Size(c - gap, c - gap)
+                        // The first time the card is seen, the squares come in from the top left of what is in view (Roll.kt).
+                        val came = if (wave == null) 1f else Motion.waveCell(wave.value, (week - (seen / c).toInt()).coerceAtLeast(0) + day)
+                        val color = (if (value <= 0 || max <= 0) empty else palette[(ceil(value / max * 4).toInt() - 1).coerceIn(0, 3)]).let { it.copy(alpha = it.alpha * came) }
+                        val full = Size(c - gap, c - gap)
+                        val box = if (came >= 1f) full else Size(full.width * (0.6f + 0.4f * came), full.height * (0.6f + 0.4f * came))
+                        val origin = Offset(week * c + gap / 2 + (full.width - box.width) / 2, top + day * c + gap / 2 + (full.height - box.height) / 2)
                         drawRoundRect(color, origin, box, CornerRadius(c * 0.2f))
-                        if (date == today) drawRoundRect(outline, origin, box, CornerRadius(c * 0.2f), style = Stroke(1.5.dp.toPx()))
+                        if (date == today) drawRoundRect(outline.copy(alpha = outline.alpha * came), origin, box, CornerRadius(c * 0.2f), style = Stroke(1.5.dp.toPx()))
                         dots[date]?.let { i ->
                             val at = Offset(origin.x + box.width / 2, origin.y + box.height * 0.78f)
-                            drawCircle(dotRing, c * 0.2f, at)
-                            drawCircle(dotColors[i], c * 0.14f, at)
+                            drawCircle(dotRing.copy(alpha = dotRing.alpha * came), c * 0.2f, at)
+                            drawCircle(dotColors[i].copy(alpha = dotColors[i].alpha * came), c * 0.14f, at)
                         }
                     }
                 }
@@ -780,6 +813,13 @@ fun SplitLineChart(
     val first = points.first().date
     val days = ChronoUnit.DAYS.between(first, points.last().date).coerceAtLeast(1)
     val hasSplit = remember(points) { points.any { it.split } }
+    // Another range stretches the line along its dates from the old frame to the new (ChartStretch.kt): the axes, the values on them and the dates ease together.
+    val target = Frame(first.toEpochDay().toDouble(), days.toDouble(), listOf(low, high, dataLow, latest))
+    val stretch = rememberStretch(target, listOf(points, shown), listOf(title, unit, imbalance, style))
+    val frame = stretch.at(target)
+    val moving = stretch.moving
+    val drawPoints = if (moving) stretch.union(0, points) else points
+    val drawShown = if (moving) stretch.union(1, shown) else shown
     val tap by rememberUpdatedState(onTap)
     // The trend, as a rise per day and the value on the first day.
     val fit = remember(points, trend) { if (trend) linearFit(points.map { ChronoUnit.DAYS.between(first, it.date).toDouble() to it.value }) else null }
@@ -851,8 +891,8 @@ fun SplitLineChart(
         val left = 46.dp.toPx()
         val top = 10.dp.toPx()
         val bottom = size.height - 10.dp.toPx()
-        val span = (high - low).takeIf { it > 0 } ?: 1.0
-        fun y(value: Double) = top + ((high - value) / span).toFloat() * (bottom - top)
+        val span = (frame.ys[1] - frame.ys[0]).takeIf { it > 0 } ?: 1.0
+        fun y(value: Double) = top + ((frame.ys[1] - value) / span).toFloat() * (bottom - top)
         val text = Paint().apply { color = labelColor; textSize = 11.sp.toPx() * textScale; isAntiAlias = true }
         val bold = Paint(text).apply { color = latestColor.toArgb(); isFakeBoldText = true }
         val goalPaint = Paint(text).apply { color = goalColor.toArgb(); isFakeBoldText = true }
@@ -860,20 +900,20 @@ fun SplitLineChart(
         val latestY = y(latest)
         val near = 13.sp.toPx() * textScale
         val path = Path()
-        fun x(p: ChartPoint) = left + ChronoUnit.DAYS.between(first, p.date).toFloat() / days * (size.width - left)
-        path.curveThrough(FloatArray(shown.size) { x(shown[it]) }, FloatArray(shown.size) { y(shown[it].value) })
-        val marks = if (hasSplit && !bars) SplitMarks(shown, this, ::x, ::y) else null
-        val raw = if (smoothed) SplitMarks(points, this, ::x, ::y) else null
-        val barMarks = if (bars) BarMarks(points, this, ::x, ::y, if (imbalance) y(0.0) else bottom) else null
+        fun x(p: ChartPoint) = left + ((p.date.toEpochDay() - frame.x0) / frame.xSpan).toFloat() * (size.width - left)
+        path.curveThrough(FloatArray(drawShown.size) { x(drawShown[it]) }, FloatArray(drawShown.size) { y(drawShown[it].value) })
+        val marks = if (hasSplit && !bars) SplitMarks(drawShown, this, ::x, ::y) else null
+        val raw = if (smoothed) SplitMarks(drawPoints, this, ::x, ::y) else null
+        val barMarks = if (bars) BarMarks(drawPoints, this, ::x, ::y, if (imbalance) y(0.0) else bottom) else null
         val zeroY = y(0.0)
         val stroke = Stroke((if (fade) look.chartLineWidth else 2.5f).dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-        val lastAt = Offset(x(shown.last()), y(shown.last().value))
-        val fadeFill = if (fade && marks == null && barMarks == null) Path().apply { addPath(path); lineTo(lastAt.x, bottom); lineTo(x(shown.first()), bottom); close() } else null
+        val lastAt = Offset(x(drawShown.last()), y(drawShown.last().value))
+        val fadeFill = if (fade && marks == null && barMarks == null) Path().apply { addPath(path); lineTo(lastAt.x, bottom); lineTo(x(drawShown.first()), bottom); close() } else null
         val fadeBrush = if (fadeFill != null) Brush.verticalGradient(listOf(line.copy(alpha = 0.16f), Color.Transparent), startY = top, endY = bottom) else null
         onDrawBehind {
             for ((band, color) in bands) {
-                val from = y(minOf(band.endInclusive, high))
-                val to = y(maxOf(band.start, low))
+                val from = y(minOf(band.endInclusive, frame.ys[1]))
+                val to = y(maxOf(band.start, frame.ys[0]))
                 if (to > from) drawRect(color.copy(alpha = fillAlpha), Offset(left, from), Size(size.width - left, to - from))
             }
             fun label(value: Double, paint: Paint) = drawContext.canvas.nativeCanvas.drawText(shortNumber(value), 0f, y(value) + text.textSize / 3, paint)
@@ -883,9 +923,19 @@ fun SplitLineChart(
             if (fade) for (k in 1..2) drawLine(grid, Offset(left, top + (bottom - top) * k / 3f), Offset(size.width, top + (bottom - top) * k / 3f))
             // The latest value: a dotted line across the chart and its number on the axis.
             drawLine(latestColor.copy(alpha = if (fade) 0.45f else 1f), Offset(left, latestY), Offset(size.width, latestY), 1.5.dp.toPx(), pathEffect = dashes)
-            if (latestY - top > near) label(high, text)
-            if (bottom - latestY > near) label(dataLow, text)
-            label(latest, bold)
+            // The values on the axis: while the range changes the old ones fade out where they are on the moving scale and the new fade in.
+            fun axis(top2: Double, low2: Double, now2: Double, alpha: Float) {
+                text.alpha = (255 * alpha).toInt(); bold.alpha = (255 * alpha).toInt()
+                val atY = y(now2)
+                if (atY - top > near) label(top2, text)
+                if (bottom - atY > near) label(low2, text)
+                label(now2, bold)
+            }
+            val before = stretch.from
+            if (before != null) {
+                axis(before.ys[1], before.ys[2], before.ys[3], 1f - stretch.t)
+                axis(high, dataLow, latest, stretch.t)
+            } else axis(high, dataLow, latest, 1f)
             if (imbalance) {
                 // Right minus left: the zero line is the axis, drawn solid and labelled unless another label is there.
                 drawLine(trendColor, Offset(left, zeroY), Offset(size.width, zeroY), 1.5.dp.toPx())
@@ -895,10 +945,11 @@ fun SplitLineChart(
                 drawLine(goalColor, Offset(left, y(goal)), Offset(size.width, y(goal)), 1.5.dp.toPx())
                 if (Math.abs(y(goal) - latestY) > near) label(goal, goalPaint)
             }
-            fit?.let { (slope, start) ->
+            if (!moving) fit?.let { (slope, start) ->
                 clipRect(left = left, top = top, bottom = bottom) { drawLine(trendColor, Offset(left, y(start)), Offset(size.width, y(start + slope * days)), 1.5.dp.toPx()) }
             }
-            clipRect(right = left + (size.width - left) * drawn) {
+            // While the range changes the line is clipped to the plot, so the part outside the new range slides off the left edge and the older part comes in from it.
+            clipRect(left = if (moving) left else 0f, right = left + (size.width - left) * drawn) {
                 raw?.let { drawRawDots(it, line) }
                 if (barMarks != null) drawBars(barMarks, line)
                 else if (marks != null) drawSplitMarks(marks, line, linesOnly = smoothed)
@@ -913,10 +964,13 @@ fun SplitLineChart(
             }
         }
     })
-    Row(Modifier.fillMaxWidth().padding(start = 46.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(prettyDay(first), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        val now = if (lastPoint.split) "L ${shortNumber(lastPoint.left!!)} · R ${shortNumber(lastPoint.right!!)}" else shortNumber(latest)
-        Text("$now $unit · ${prettyDay(lastPoint.date)}".trim(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    // The dates under the chart cross over when the range changes.
+    Crossfade(first, Modifier.fillMaxWidth(), animationSpec = if (LocalMotion.current) Motion.stretch() else snap(), label = "range dates") { shownFirst ->
+        Row(Modifier.fillMaxWidth().padding(start = 46.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(prettyDay(shownFirst), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val now = if (lastPoint.split) "L ${shortNumber(lastPoint.left!!)} · R ${shortNumber(lastPoint.right!!)}" else shortNumber(latest)
+            Text("$now $unit · ${prettyDay(lastPoint.date)}".trim(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
     if (hasSplit) SidesKey(line, Modifier.padding(start = 46.dp), bars)
     if (imbalance) Text("Above 0: right leads. Below 0: left leads.", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1162,6 +1216,11 @@ fun MultiLineChart(series: List<ChartSeries>, title: String = "", height: Dp = 1
     val last = series.maxOf { it.points.last().date }
     val days = ChronoUnit.DAYS.between(first, last).coerceAtLeast(1)
     val drawn by drawnIn()
+    // Another range stretches every line along its dates, each on its own scale (ChartStretch.kt).
+    val target = Frame(first.toEpochDay().toDouble(), days.toDouble(), series.flatMap { line -> val scale = if (shared) series else listOf(line); listOf(scale.minOf { s -> s.points.minOf { it.low } }, scale.maxOf { s -> s.points.maxOf { it.high } }) })
+    val stretch = rememberStretch(target, series.map { it.points }, listOf(title, series.map { it.label }))
+    val frame = stretch.at(target)
+    val moving = stretch.moving
     // Several lines on their own scales cannot be bars side by side and stay readable, so Bars draws "All" as lines; Smoothed averages each line.
     val smoothed = LocalChartStyle.current == ChartStyle.SMOOTH
     // The line named [morphLabel], when plain, is the one that travels from a card ([rememberChartMorph]).
@@ -1185,26 +1244,26 @@ fun MultiLineChart(series: List<ChartSeries>, title: String = "", height: Dp = 1
         // Each line is worked out once for this size, not on each frame of its drawing-in.
         val top = 10.dp.toPx()
         val bottom = size.height - 10.dp.toPx()
-        val paths = series.map { line ->
-            // The line's own scale takes in both ends of every stem; a shared one takes in every line.
-            val scale = if (shared) series else listOf(line)
-            val low = scale.minOf { s -> s.points.minOf { it.low } }
-            val span = (scale.maxOf { s -> s.points.maxOf { it.high } } - low).takeIf { it > 0 } ?: 1.0
+        val paths = series.mapIndexed { index, line ->
+            // The line's own scale takes in both ends of every stem; a shared one takes in every line (worked out in [target]).
+            val low = frame.ys[2 * index]
+            val span = (frame.ys[2 * index + 1] - low).takeIf { it > 0 } ?: 1.0
             fun y(value: Double) = bottom - ((value - low) / span).toFloat() * (bottom - top)
-            fun x(p: ChartPoint) = ChronoUnit.DAYS.between(first, p.date).toFloat() / days * size.width
+            fun x(p: ChartPoint) = ((p.date.toEpochDay() - frame.x0) / frame.xSpan).toFloat() * size.width
+            val own = stretch.union(index, line.points)
             val path = Path()
-            val shown = if (smoothed) smoothedPoints(line.points) else line.points
+            val shown = if (smoothed) smoothedPoints(own) else own
             path.curveThrough(FloatArray(shown.size) { x(shown[it]) }, FloatArray(shown.size) { y(shown[it].value) })
             val marks = if (shown.any { it.split }) SplitMarks(shown, this, ::x, ::y) else null
-            Drawn(path, if (single) look.chartLine ?: accent else line.color ?: accent, marks, if (smoothed) SplitMarks(line.points, this, ::x, ::y) else null)
+            Drawn(path, if (single) look.chartLine ?: accent else line.color ?: accent, marks, if (smoothed) SplitMarks(own, this, ::x, ::y) else null)
         }
         val stroke = Stroke((if (single) look.chartLineWidth else 2.5f).dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         // Linen, one line: a wash under it that fades to nothing.
         val only = paths.firstOrNull()
         val wash = if (single && only != null && only.marks == null) {
-            val points = series[0].points
-            val firstX = ChronoUnit.DAYS.between(first, points.first().date).toFloat() / days * size.width
-            val lastX = ChronoUnit.DAYS.between(first, points.last().date).toFloat() / days * size.width
+            val points = stretch.union(0, series[0].points)
+            val firstX = ((points.first().date.toEpochDay() - frame.x0) / frame.xSpan).toFloat() * size.width
+            val lastX = ((points.last().date.toEpochDay() - frame.x0) / frame.xSpan).toFloat() * size.width
             Path().apply { addPath(only.path); lineTo(lastX, bottom); lineTo(firstX, bottom); close() }
         } else null
         val washBrush = if (wash != null) Brush.verticalGradient(listOf(only!!.color.copy(alpha = 0.16f), Color.Transparent), startY = top, endY = bottom) else null
@@ -1212,7 +1271,7 @@ fun MultiLineChart(series: List<ChartSeries>, title: String = "", height: Dp = 1
             drawLine(grid, Offset(0f, top), Offset(size.width, top))
             drawLine(grid, Offset(0f, bottom), Offset(size.width, bottom))
             if (single) for (k in 1..2) drawLine(grid, Offset(0f, top + (bottom - top) * k / 3f), Offset(size.width, top + (bottom - top) * k / 3f))
-            clipRect(right = size.width * drawn) {
+            clipRect(left = if (moving) 0f else -size.width, right = size.width * drawn) {
                 for ((i, drawnLine) in paths.withIndex()) {
                     val (path, color, marks, raw) = drawnLine
                     raw?.let { drawRawDots(it, color) }
@@ -1226,9 +1285,12 @@ fun MultiLineChart(series: List<ChartSeries>, title: String = "", height: Dp = 1
             }
         }
     })
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(prettyDay(first), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(prettyDay(last), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    // The dates under the chart cross over when the range changes.
+    Crossfade(first to last, Modifier.fillMaxWidth(), animationSpec = if (LocalMotion.current) Motion.stretch() else snap(), label = "range dates") { (shownFirst, shownLast) ->
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(prettyDay(shownFirst), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(prettyDay(shownLast), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
     // One key for the whole chart, when any line has a session done left and right.
     if (series.any { s -> s.points.any { it.split } }) SidesKey(MaterialTheme.colorScheme.onSurfaceVariant)

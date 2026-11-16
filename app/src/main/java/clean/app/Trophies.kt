@@ -71,7 +71,7 @@ fun TrophiesScreen(model: AppModel) {
             // With a program the streak that leads is the program's, and the weekly target's goes second.
             val lead = program?.streak ?: streak
             item {
-                Section("Streak") {
+                Section("Streak", Modifier.settleIn(0)) {
                     MorphText(
                         androidx.compose.ui.text.AnnotatedString(if (program != null) spanText(lead.length) else plural(lead.length, "week") + if (lead.length >= 4) " · about ${plural(approxMonths(lead.length), "month")}" else ""),
                         "number", onPage = true, style = MaterialTheme.typography.headlineMedium.numbers(), fontWeight = FontWeight.SemiBold,
@@ -97,7 +97,7 @@ fun TrophiesScreen(model: AppModel) {
                 }
             }
             if (program != null) item {
-                Section("This week on program") {
+                Section("This week on program", Modifier.settleIn(1)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
                         for (slot in program.now?.slots.orEmpty()) {
                             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
@@ -118,7 +118,7 @@ fun TrophiesScreen(model: AppModel) {
                 }
             }
             item {
-                Section("Last $CELLS weeks") {
+                Section("Last $CELLS weeks", Modifier.settleIn(2)) {
                     val byMonday = if (program != null) {
                         program.weeks.withIndex().associate { (i, week) ->
                             val training = week.slots.filter { it.day != null }
@@ -140,7 +140,7 @@ fun TrophiesScreen(model: AppModel) {
                 }
             }
             item {
-                Section("Badges") {
+                Section("Badges", Modifier.settleIn(3)) {
                     val awards = c.awards + program?.awards.orEmpty()
                     val earned = awards.filter { it.earned != null }.sortedByDescending { it.earned }
                     if (earned.isEmpty()) Text("None yet. A month of weeks that meet the target earns the first, and so do ten workouts.", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -171,7 +171,7 @@ fun TrophiesScreen(model: AppModel) {
                 }
             }
             item {
-                Section("Habits") {
+                Section("Habits", Modifier.settleIn(4)) {
                     LabelValue("Weeks trained in a row", c.weeksTrained.toString()) { model.open(Screen.Calendar()) }
                     c.longestBreak?.let { gap ->
                         LabelValue("Longest break", plural(gap.days, "day")) { model.open(Screen.WorkoutDetail(gap.to)) }

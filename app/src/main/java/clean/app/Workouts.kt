@@ -133,6 +133,8 @@ fun HistoryScreen(model: AppModel) {
     // Where a workout matched only through a note, a line of the note with the match.
     val snippets = remember(found) { found?.mapNotNull { (w, snippet) -> snippet?.let { w.date to it } }?.toMap().orEmpty() }
     val byMonth = remember(shown) { shown.reversed().groupBy { it.day.take(7) } }
+    // The first cards of the list rise into place when the page opens (Roll.kt).
+    val rank = remember(shown) { shown.reversed().withIndex().associate { it.value.date to it.index } }
     val actions: @Composable () -> Unit = {
         IconButton(onClick = { searching = !searching; if (!searching) query = "" }) { Icon(if (searching) CleanIcons.Close else CleanIcons.Search, "Search history") }
         IconButton(onClick = { model.open(Screen.Calendar()) }) { Icon(CleanIcons.Calendar, "Calendar") }
@@ -158,7 +160,7 @@ fun HistoryScreen(model: AppModel) {
                 val volume = remember(workout, settings, bodyweight) { volumeOf(workout, model::loadOf) }
                 // The card opens its workout's page as a container that grows out of it (a page card, see [LocalCardKey]).
                 androidx.compose.runtime.CompositionLocalProvider(LocalCardKey provides "page:history:${workout.date}") {
-                    Box { WorkoutCard(workout, model, volume, recordCount(workout, prs[workout.date].orEmpty()), snippets[workout.date]) }
+                    Box(Modifier.settleIn(rank[workout.date] ?: Motion.SETTLE_ROWS)) { WorkoutCard(workout, model, volume, recordCount(workout, prs[workout.date].orEmpty()), snippets[workout.date]) }
                 }
             }
         }
@@ -505,7 +507,7 @@ fun RoundRows(model: AppModel, block: Block, kinds: List<Set<PrKind>>, estimate:
 /** A set's PRs, one badge each, and one more naming whatever it only matched. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PrBadges(kinds: Set<PrKind>, modifier: Modifier = Modifier, sides: Map<PrKind, Set<Side>> = emptyMap()) {
+fun PrBadges(kinds: Set<PrKind>, modifier: Modifier = Modifier, sides: Map<PrKind, Set<Side>> = emptyMap(), landing: Set<PrKind> = emptySet()) {
     if (kinds.isEmpty()) return
     FlowRow(modifier, horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         // Green for a PR, amber for a best that was equalled; the word is only which kind.
@@ -515,8 +517,8 @@ fun PrBadges(kinds: Set<PrKind>, modifier: Modifier = Modifier, sides: Map<PrKin
             val label = kind.label + earned.joinToString("") { if (it == Side.LEFT) " L" else " R" }
             val spoken = kind.label + if (earned.isEmpty()) "" else " " + earned.joinToString(" and ") { if (it == Side.LEFT) "left" else "right" }
             // Colour alone says matched or new, so the spoken name says it too.
-            if (kind.matched) Badge(label, Modifier.semantics { contentDescription = "$spoken, matched" }, MaterialTheme.colorScheme.tertiary)
-            else Badge(label, Modifier.semantics { contentDescription = "$spoken, new PR" })
+            if (kind.matched) Badge(label, Modifier.landing(kind in landing).semantics { contentDescription = "$spoken, matched" }, MaterialTheme.colorScheme.tertiary)
+            else Badge(label, Modifier.landing(kind in landing).semantics { contentDescription = "$spoken, new PR" })
         }
     }
 }

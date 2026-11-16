@@ -48,6 +48,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.runtime.CompositionLocalProvider
+import kotlinx.coroutines.delay
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.togetherWith
@@ -263,6 +265,10 @@ fun SettingsScreen(model: AppModel) {
             },
             label = "settings page",
         ) { page ->
+        // A page of options opening settles its first sections in (Roll.kt); the list coming back does not.
+        val entered = remember(page) { if (page != null) SettleState(armed = true) else null }
+        LaunchedEffect(entered) { if (entered != null) { delay(Motion.settleWindowMillis()); entered.armed = false } }
+        CompositionLocalProvider(LocalSettle provides (entered ?: LocalSettle.current)) {
         val listState = rememberLazyListState()
         // Scrolled to the section a search led to: the list is stepped through until its item is laid out, then brought to the top.
         if (page != null) LaunchedEffect(Unit) {
@@ -294,7 +300,7 @@ fun SettingsScreen(model: AppModel) {
             }
             if (page == null && query.isBlank()) {
                 items(SETTINGS_PAGES) { (title, about) ->
-                    Row(Modifier.fillMaxWidth().clickable { openPage(title) }.padding(horizontal = Space.l, vertical = Space.l), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.l)) {
+                    Row(Modifier.settleNext().fillMaxWidth().clickable { openPage(title) }.padding(horizontal = Space.l, vertical = Space.l), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.l)) {
                         val icon = when (title) {
                             "Profile" -> CleanIcons.Person
                             "Workout" -> CleanIcons.Dumbbell
@@ -319,7 +325,7 @@ fun SettingsScreen(model: AppModel) {
             }
             if (page == "Profile") profile?.let { p ->
                 item(key = "s-profile:${p.id}") {
-                    Section("This profile") {
+                    Section("This profile", Modifier.settleNext()) {
                         var name by remember { mutableStateOf(p.name) }
                         var height by remember { mutableStateOf(p.heightCm?.let(::shortNumber) ?: "") }
                         OutlinedTextField(name, { name = it; if (it.isNotBlank()) model.update(p.copy(name = it.trim())) }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -336,7 +342,7 @@ fun SettingsScreen(model: AppModel) {
                 }
             }
             if (page == "Profile") item(key = "s-profiles") {
-                Section("Profiles") {
+                Section("Profiles", Modifier.settleNext()) {
                     for (p in profiles) {
                         Row(Modifier.fillMaxWidth().clickable { model.switchTo(p.id) }, verticalAlignment = Alignment.CenterVertically) {
                             RadioButton(selected = p.id == profile?.id, onClick = { model.switchTo(p.id) })
@@ -348,7 +354,7 @@ fun SettingsScreen(model: AppModel) {
                 }
             }
             if (page == "Data") item(key = "s-backup") {
-                Section("Backup") {
+                Section("Backup", Modifier.settleNext()) {
                     Text(
                         "One zip with everything in Clean. Restoring it replaces what is on the phone. Keep it somewhere off the phone.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -375,7 +381,7 @@ fun SettingsScreen(model: AppModel) {
                 }
             }
             if (page == "Data") item(key = "s-health") {
-                Section("Health Connect") {
+                Section("Health Connect", Modifier.settleNext()) {
                     Text(
                         "Health Connect is the store on this phone that health apps share. With this on, Clean writes each finished workout to it (as strength training, with its name and times) and each weigh-in. Clean reads nothing from it, and none of it goes online.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -396,7 +402,7 @@ fun SettingsScreen(model: AppModel) {
                 }
             }
             if (page == "Data") item(key = "s-animations") {
-                Section("Exercise animations") {
+                Section("Exercise animations", Modifier.settleNext()) {
                     Text(
                         "The steps on an exercise's Info tab can have a moving picture above them. The pictures are © Gym visual and are not part of Clean: for your own use, download the zip of github.com/hasaneyldrm/exercises-dataset (Code, Download ZIP, about 130 MB) in a browser and pick it here. Only the pictures are copied in; the app still never goes online.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -407,7 +413,7 @@ fun SettingsScreen(model: AppModel) {
                 }
             }
             if (page == "Data") item(key = "s-templates") {
-                Section("Templates") {
+                Section("Templates", Modifier.settleNext()) {
                     Text("Strong's export has no templates, so they travel in a file of Clean's own, folders included. The same two actions are in the Workout tab's ⋯ menu.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     QuietButton("Export templates", { saveTemplates.launch("clean_templates_${LocalDate.now()}.json") }, Modifier.fillMaxWidth())
                     QuietButton("Import templates", { model.importTemplatesNow = true; model.stack.clear(); model.tab = Tab.Workout }, Modifier.fillMaxWidth())
@@ -416,7 +422,7 @@ fun SettingsScreen(model: AppModel) {
             // Performance mode (2026-11-16, the user's words: "an option in settings called performance mode, to turn off all animations"):
             // the old Animations switch turned over, kv `ui.motion` = `off` when on, so nothing moves anywhere (Motion, LocalMotion).
             if (page == "Appearance") item(key = "ap-performance") {
-                Section("Performance") {
+                Section("Performance", Modifier.settleNext()) {
                     Toggle(model, "ui.motion", "Performance mode", "Turns off every animation: cards growing into pages, fades, glides and celebrations. Everything changes at once.",
                         inverted = true)
                 }
@@ -426,18 +432,18 @@ fun SettingsScreen(model: AppModel) {
             if (page == "Appearance") item(key = "ap-daynight") { DayNightSection(model) }
             if (page == "Appearance") item(key = "ap-mix") { MixSection(model) { wheel = it } }
             if (page == "Appearance") item(key = "ap-home") {
-                Section("Home") {
+                Section("Home", Modifier.settleNext()) {
                     HomeOptions(model)
                     LinkRow("Arrange home", "Move, resize, hide or add the cards on Home", "") { model.open(Screen.EditHome) }
                     LinkRow("Arrange profile", "Move, resize, hide or add the cards on Profile", "") { model.open(Screen.EditProfile) }
                 }
             }
             if (page == "Appearance") item(key = "ap-tabs") {
-                Section("Tab bar") { LinkRow("Tab order", "Where each tab sits; Workout stays in the middle", "") { model.open(Screen.Navigation) } }
+                Section("Tab bar", Modifier.settleNext()) { LinkRow("Tab order", "Where each tab sits; Workout stays in the middle", "") { model.open(Screen.Navigation) } }
             }
             if (page == "Appearance") item(key = "ap-charts") {
                 val stored by model.options.collectAsState()
-                Section("Charts") {
+                Section("Charts", Modifier.settleNext()) {
                     Text("How the charts on exercise, weight, trends and template pages draw their figures", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Choice(ChartStyle.entries.toList(), chartStyleOf(stored["chart.style"]), { it.label }) { model.setOption("chart.style", it.key) }
                     Text(
@@ -447,7 +453,7 @@ fun SettingsScreen(model: AppModel) {
                 }
             }
             if (page == "Appearance") item(key = "ap-customize") {
-                Section("Customize") {
+                Section("Customize", Modifier.settleNext()) {
                     // "Preset's own" clears the override, so the part is the preset's value again (2026-10-16).
                     val stored by model.options.collectAsState()
                     Text("Theme", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -486,7 +492,7 @@ fun SettingsScreen(model: AppModel) {
                 }
             }
             if (page == "Workout") item(key = "s-autofill") {
-                Section("Auto-fill sets") {
+                Section("Auto-fill sets", Modifier.settleNext()) {
                     Text(
                         "“Auto-fill sets” in an exercise's options during a workout lays out these sets and fills in a weight and reps that would beat your best estimated 1RM: more reps at the same weight first, then more weight.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -501,7 +507,7 @@ fun SettingsScreen(model: AppModel) {
                 }
             }
             if (page == "Workout") item(key = "s-consistency") {
-                Section("Consistency") {
+                Section("Consistency", Modifier.settleNext()) {
                     val goals = model.targets.collectAsState().value.orEmpty()
                     val monday = clean.core.weekStart(java.time.LocalDate.now())
                     Text("Weekly target", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -522,7 +528,7 @@ fun SettingsScreen(model: AppModel) {
                 }
             }
             if (page == "Workout") item(key = "s-weeksets") {
-                Section("Weekly sets per muscle") {
+                Section("Weekly sets per muscle", Modifier.settleNext()) {
                     val range by model.defaultSetRange.collectAsState()
                     var low by remember { mutableStateOf(range.min.toString()) }
                     var high by remember { mutableStateOf(range.max.toString()) }
@@ -538,7 +544,7 @@ fun SettingsScreen(model: AppModel) {
                 }
             }
             if (page == "Workout") item(key = "s-onerm") {
-                Section("Estimated 1RM") {
+                Section("Estimated 1RM", Modifier.settleNext()) {
                     Text(
                         "The heaviest single you could likely lift, worked out from a set's weight and reps. It is what 1RM PRs, the charts, the 1RM tiles and the L 1RM and R 1RM columns show.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -572,7 +578,7 @@ fun SettingsScreen(model: AppModel) {
             }
             if (page == "Workout") item(key = "s-layout") {
                 val stored by model.options.collectAsState()
-                Section("Layout") {
+                Section("Layout", Modifier.settleNext()) {
                     Text("Set rows", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     val rows = listOf("comfortable" to "Comfortable", "compact" to "Compact")
                     Choice(rows, rows.firstOrNull { it.first == stored["workout.rows"] } ?: rows[0], { it.second }) { model.setOption("workout.rows", it.first) }
@@ -595,7 +601,7 @@ fun SettingsScreen(model: AppModel) {
             }
             if (page == "Workout") item(key = "s-rest") {
                 val stored by model.options.collectAsState()
-                Section("Rest timer") {
+                Section("Rest timer", Modifier.settleNext()) {
                     Text("While resting, the countdown is shown as", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     val styles = listOf("full" to "Full screen", "ring" to "Ring", "bar" to "Slim bar", "hide" to "Full screen then hide")
                     Choice(styles, styles.firstOrNull { it.first == stored["rest.style"] } ?: styles[0], { it.second }) { model.setOption("rest.style", it.first) }
@@ -621,7 +627,7 @@ fun SettingsScreen(model: AppModel) {
             }
             if (page == "Workout") item(key = "s-feedback") {
                 val stored by model.options.collectAsState()
-                Section("Feedback") {
+                Section("Feedback", Modifier.settleNext()) {
                     Text("When a set is ticked", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     val ticks = listOf("off" to "Off", "light" to "Light", "strong" to "Strong")
                     Choice(ticks, ticks.firstOrNull { it.first == stored["feedback.tick"] } ?: ticks[1], { it.second }) { model.setOption("feedback.tick", it.first); if (it.first == "strong") Feedback.pulse(40) }
@@ -643,11 +649,11 @@ fun SettingsScreen(model: AppModel) {
                 }
             }
             if (page == "Workout") item(key = "s-outside") {
-                Section("Outside the app") { LinkRow("Launcher shortcuts", shortcutsName(model.options.collectAsState().value["shortcuts"]), "") { model.open(Screen.Shortcuts) } }
+                Section("Outside the app", Modifier.settleNext()) { LinkRow("Launcher shortcuts", shortcutsName(model.options.collectAsState().value["shortcuts"]), "") { model.open(Screen.Shortcuts) } }
             }
             if (page == "Workout") item(key = "s-tplcolors") { TemplateColorSettings(model) }
             if (page == "Workout") item(key = "s-during") {
-                Section("During a workout") {
+                Section("During a workout", Modifier.settleNext()) {
                     RestChoice("Rest after a set", restDefault, listOf(0, 60, 90, 120, 180, 300), { model.setOption("rest.seconds", it.toString()) })
                     Text("An exercise can have its own length, from its options in a workout.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     // A kind of set can have a rest of its own; "Same" follows the length above, and a warm-up left alone rests half of it.
@@ -714,18 +720,18 @@ fun SettingsScreen(model: AppModel) {
             }
             if (page == "Data") item(key = "s-renamed") { RenamedExercises(model) }
             if (page == "Tips") item(key = "s-tips") {
-                Section("Gestures worth knowing") {
+                Section("Gestures worth knowing", Modifier.settleNext()) {
                     for (tip in TIPS) Text(tip)
                 }
             }
             if (page == "Data") item(key = "s-tidy") {
-                Section("Tidy up") {
+                Section("Tidy up", Modifier.settleNext()) {
                     Text("Notes such as “Wide grip” can be turned into variations, so those sets get their own history and PRs.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     QuietButton("Turn notes into variations", { model.open(Screen.NoteReview()) }, Modifier.fillMaxWidth())
                 }
             }
             if (page == "Data") item(key = "s-delete") {
-                Section("Delete everything") {
+                Section("Delete everything", Modifier.settleNext()) {
                     Text(
                         "Takes every profile, workout, template, measurement, option and imported file off this phone, and Clean starts as when it was first installed.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -734,14 +740,14 @@ fun SettingsScreen(model: AppModel) {
                 }
             }
             if (page == "Lists") item(key = "s-lists") {
-                Section("Lists") {
+                Section("Lists", Modifier.settleNext()) {
                     Toggle(model, "library.hide", "Hide built-in exercises I haven't used", "They still turn up when you search or filter.")
                     Toggle(model, "exercise.plateau", "Point out stalled exercises", "A line on an exercise's page when its last five sessions set no new best estimated 1RM.")
                     Toggle(model, "calendar.weeks", "Week totals in the calendar")
                 }
             }
             if (page == "Credits") item(key = "s-source") {
-                Section("Source code") {
+                Section("Source code", Modifier.settleNext()) {
                     Text("Clean is open source under the MIT License. The code is at $SOURCE_URL.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     // Handed to the phone's browser; Clean itself still has no internet access. Without a browser the address is copied instead.
                     TextButton(onClick = {
@@ -761,7 +767,7 @@ fun SettingsScreen(model: AppModel) {
                 if (releases.isNotEmpty()) Section("What's new") { ChangeList(releases) }
             }
             if (page == "Credits") item(key = "s-credits") {
-                Section("Credits") {
+                Section("Credits", Modifier.settleNext()) {
                     Text("The body figure is drawn from MuscleMap by Melih Colpan, used under the MIT License.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     TextButton(onClick = { credits = true }) { Text("Show the licence") }
                     Text("The steps on an exercise's Info tab are from exercises-dataset by Hasan Emir Yıldırım (github.com/hasaneyldrm/exercises-dataset), used under the MIT License. None of that dataset's pictures or animations are in the app.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -772,6 +778,7 @@ fun SettingsScreen(model: AppModel) {
                 }
             }
             item { Spacer(Modifier.height(Space.xxl)) }
+        }
         }
         }
         }

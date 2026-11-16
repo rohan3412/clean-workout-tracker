@@ -101,7 +101,7 @@ fun PresetSection(model: AppModel) {
     var menuFor by remember { mutableStateOf<SavedPreset?>(null) }
     var renaming by remember { mutableStateOf<SavedPreset?>(null) }
     var all by remember { mutableStateOf(false) }
-    Section("Preset") {
+    Section("Preset", Modifier.settleNext()) {
         Choice(PRESET_LABELS.keys.toList() + DAYNIGHT, if (active == null) chosen else "", { PRESET_LABELS[it] ?: "Day & night" }) { model.choosePreset(it) }
         if (saved.isNotEmpty()) {
             Caption("Custom")
@@ -216,7 +216,7 @@ fun DayNightSection(model: AppModel) {
     fun askTime(key: String, minutes: Int) {
         android.app.TimePickerDialog(context, { _, hour, minute -> model.setOption(key, clockText(hour * 60 + minute)) }, minutes / 60, minutes % 60, true).blinking().show()
     }
-    Section("Day & night") {
+    Section("Day & night", Modifier.settleNext()) {
         DropdownRow("Day preset", day, presets) { model.setOption("theme.day", it) }
         DropdownRow("Night preset", night, presets) { model.setOption("theme.night", it) }
         Text("Switch", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -253,7 +253,7 @@ fun MixSection(model: AppModel, onWheel: (String) -> Unit) {
     val look by model.look.collectAsState()
     var advanced by remember { mutableStateOf(false) }
     val rest = Part.entries - BASIC_PARTS.toSet()
-    Section("Mix and match") {
+    Section("Mix and match", Modifier.settleNext()) {
         Hint("Each part starts at the preset's own value. Change any one; the rest stay. Picking a preset resets them.")
         for (part in BASIC_PARTS + if (advanced) rest else emptyList()) {
             val choices = partChoices(part)
@@ -352,7 +352,7 @@ fun MonoSection(model: AppModel) {
     if (!look.mono) return
     val o by model.options.collectAsState()
     val settings = monoSettingsOf(o)
-    Section("Mono") {
+    Section("Mono", Modifier.settleNext()) {
         MonoSlider(model, "mono.paper", "Paper", settings.paper) { monoPaper(it).rgbHex() }
         MonoSlider(model, "mono.ink", "Ink", settings.ink) { monoInk(it).rgbHex() }
         Hint("Everything else is a mix of the two: quiet text is the ink at 60 %, tracks and raised surfaces the ink at 10 %, and the outlines are the ink.")

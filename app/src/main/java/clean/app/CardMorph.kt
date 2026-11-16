@@ -96,6 +96,9 @@ val LocalPageMorphCard = staticCompositionLocalOf<String?> { null }
 /** How far the page being drawn is along a page card's change: 0 to 1 for the page that grows (1 to 0 going back), 0 to 1 the other way for the page under it. */
 val LocalPageProgress = staticCompositionLocalOf<State<Float>?> { null }
 
+/** The key of the workout banner docked on the tab bar: the one card the workout page (`Screen.Active`) grows out of. */
+const val BANNER_CARD = "banner:workout"
+
 /** Whether [key] is the key of a card on a page (page to page) and not of one on the tabs page. */
 internal fun isPageKey(key: String) = key.startsWith("page:")
 @Composable internal fun morphingOf(key: String): () -> Boolean = if (isPageKey(key)) LocalPageMorphing.current else LocalMorphing.current

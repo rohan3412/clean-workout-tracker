@@ -9,6 +9,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performScrollToKey
 import androidx.compose.ui.layout.boundsInRoot
@@ -21,6 +22,8 @@ import clean.app.data.Kv
 import clean.app.data.Repo
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.semantics.getOrNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -168,8 +171,9 @@ class MotionFramesTest {
         println("$name: the change shows from frame ${begun + 1} (${(begun + 1) * 16} ms)")
         for ((i, f) in frames.withIndex()) if (i >= begun + 160 / 16) {
             val p = pixels(f)
-            val offAt = p.indices.filter { diff(p[it], b[it]) > 12 }
             val w = f.width
+            // The tab bar is left out: its pill glides to the new tab on its own clock (Motion.PILL), longer than the blink; tabPillGlidesAndFollowsASwipe covers it.
+            val offAt = p.indices.filter { diff(p[it], b[it]) > 12 && it / w < 700 }
             assertTrue(
                 "$name at ${(i - begun) * 16} ms after it began: ${offAt.size} pixels not yet at rest, between x ${offAt.minOfOrNull { it % w }}..${offAt.maxOfOrNull { it % w }}, y ${offAt.minOfOrNull { it / w }}..${offAt.maxOfOrNull { it / w }}",
                 offAt.size * 1000 < p.size,
@@ -660,8 +664,191 @@ class MotionFramesTest {
     @Test fun swipeMiniFigure() = slideCheck("body-mini", "Body figure, ") { }
     @Test fun swipePageFigure() = slideCheck("body-page", "Body figure:") { compose.runOnIdle { model.open(Screen.Body) } }
 
+    // ---- the workout screen's moves (stage F2) ----
+
+    private fun openWorkout(blocks: List<DraftBlock>): ActivityScenario<MainActivity> {
+        val scenario = launch()
+        compose.runOnIdle {
+            model.setOption("rest.seconds", "0")
+            model.putDraft(Draft("Workout", System.currentTimeMillis(), blocks))
+            model.open(Screen.Active)
+        }
+        compose.waitForIdle()
+        return scenario
+    }
+
+    private fun setsOf(vararg done: Boolean) = done.map { DraftSet(clean.core.SetType.NORMAL, "60", "8", it) }
+
+    private fun described(text: String, substring: Boolean = false) = compose.onAllNodes(androidx.compose.ui.test.hasContentDescription(text, substring = substring), useUnmergedTree = true)
+
+    private fun textNodes(text: String, substring: Boolean = false) = compose.onAllNodes(androidx.compose.ui.test.hasText(text, substring = substring), useUnmergedTree = true)
+
+    /** Steps [ms] after [act] one frame at a time, giving each frame with [probe]'s reading of it (the first reading is before [act]). */
+    private fun <T> stepped(act: () -> Unit, ms: Int, probe: () -> T): Pair<List<Bitmap>, List<T>> {
+        compose.mainClock.autoAdvance = false
+        compose.mainClock.advanceTimeBy(3000)
+        val frames = mutableListOf(frame())
+        val readings = mutableListOf(probe())
+        compose.runOnIdle(act)
+        var t = 0
+        while (t < ms) { compose.mainClock.advanceTimeBy(16); frames += frame(); readings += probe(); t += 16 }
+        compose.mainClock.advanceTimeBy(3000)
+        frames += frame()
+        readings += probe()
+        compose.mainClock.autoAdvance = true
+        return frames to readings
+    }
+
+    private fun top(nodes: androidx.compose.ui.test.SemanticsNodeInteractionCollection): Float? = nodes.fetchSemanticsNodes().firstOrNull()?.boundsInRoot?.top
+
+    @Test fun workoutTickGlideAndSweep() {
+        val scenario = openWorkout(listOf(DraftBlock("Bench Press (Barbell)", setsOf(false, false, false))))
+        val tick1 = described("Set 1")[0].fetchSemanticsNode().boundsInRoot
+        val tick2 = described("Set 2")[0].fetchSemanticsNode().boundsInRoot
+        val y1 = tick1.center.y.toInt()
+        val y2 = tick2.center.y.toInt()
+        val (frames, _) = stepped({ described("Set 1")[0].performClick() }, 480) { 0 }
+        saveStrip("workout-tick", pick(frames, 2, 13), 7)
+        saveStrip("workout-tick-fine", frames.subList(0, 14), 7)
+        saveStrip("workout-tick-rest", frames.takeLast(4), 4, 1)
+        fun px(f: Bitmap, x: Int, y: Int) = f.getPixel(x, y)
+        val right = 392
+        val left = 6
+        val start = frames.first()
+        val end = frames.last()
+        val lit = px(start, left, y1)
+        assertTrue("the next set was not lit before the tick", diff(lit, px(start, left, y2)) > 12)
+        assertTrue("the second set is not lit at the end", diff(px(end, left, y2), lit) < 14)
+        val done = px(end, left, y1)
+        assertTrue("the ticked row has no done tint at the end", diff(done, lit) > 12 && diff(done, px(start, left, y2)) > 12)
+        // The tint reaches the tick's end of the row before the far end.
+        val atRight = frames.indexOfFirst { diff(px(it, right, y1), px(end, right, y1)) < 8 }
+        val atLeft = frames.indexOfFirst { diff(px(it, left, y1), done) < 8 }
+        println("tint reaches the right at frame $atRight, the left at frame $atLeft")
+        assertTrue("the tint did not spread from the tick: right at $atRight, left at $atLeft", atRight in 0 until atLeft)
+        assertTrue("the tint did not take some frames: left at $atLeft", atLeft >= 8)
+        // One highlight glides down: where the lit pixels of the left edge are, between the two rows.
+        val centres = frames.map { f ->
+            val ys = (y1 - 30..y2 + 30).filter { diff(px(f, left, it), lit) < 14 }
+            if (ys.isEmpty()) null else ys.average()
+        }
+        println("highlight centre per frame: $centres")
+        assertTrue("the highlight never travelled between the rows", centres.any { it != null && it > y1 + 8 && it < y2 - 8 })
+        val seen = centres.filterNotNull()
+        assertTrue("the highlight went back up: $centres", seen.zipWithNext().all { (a, b) -> b >= a - 1.0 })
+        assertTrue("the highlight did not end on the second row: ${seen.last()}", Math.abs(seen.last() - y2) < 24)
+        scenario.close()
+    }
+
+    @Test fun workoutTickCutWithAnimationsOff() {
+        seedOff = true
+        val scenario = openWorkout(listOf(DraftBlock("Bench Press (Barbell)", setsOf(false, false, false))))
+        val (frames, _) = stepped({ described("Set 1")[0].performClick() }, 160) { 0 }
+        val rest = pixels(frames.last())
+        val soon = pixels(frames[3])
+        val band = (frames.first().width * 250 until frames.first().width * 420).filter { it % frames.first().width < 340 }
+        saveStrip("workout-tick-off", listOf(frames[0], frames[1], frames[2], frames[3], frames.last()), 5, 1)
+        println("animations off: " + band.count { diff(soon[it], rest[it]) > 12 } + " of " + band.size + " differ at frame 3")
+        assertTrue("the tick tint and the highlight were not at rest at once", band.count { diff(soon[it], rest[it]) > 12 } * 400 < band.size)
+        scenario.close()
+    }
+
+    @Test fun workoutFinishedExerciseFolds() {
+        val scenario = openWorkout(listOf(DraftBlock("Bench Press (Barbell)", setsOf(true, true, false))))
+        val before = top(textNodes("Add exercise"))!!
+        val (frames, ys) = stepped({ described("Set 3")[0].performClick() }, 480) { top(textNodes("Add exercise")) }
+        saveStrip("workout-fold", pick(frames, 2, 13), 7)
+        saveStrip("workout-fold-rest", frames.takeLast(4), 4, 1)
+        println("fold: Add exercise at $ys")
+        val moved = ys.filterNotNull().let { all -> all.drop(all.indexOf(all.max())) }
+        assertTrue("the rows did not fold up over frames: $moved", moved.zipWithNext().all { (a, b) -> b <= a + 0.5f } && moved.distinct().size >= 8)
+        assertTrue("the exercise did not shrink", moved.last() < before - 60f)
+        assertTrue("the summary line is not there", textNodes("× 8", substring = true).fetchSemanticsNodes().isNotEmpty())
+        // Touching the line unfolds it again, the same way back.
+        val (back, ys2) = stepped({ compose.onAllNodes(androidx.compose.ui.test.hasText("× 8", substring = true) and androidx.compose.ui.test.hasClickAction())[0].performClick() }, 480) { top(textNodes("Add exercise")) }
+        saveStrip("workout-unfold", pick(back, 2, 13), 7)
+        val grew = ys2.filterNotNull()
+        println("unfold: Add exercise at $ys2")
+        assertTrue("the rows did not unfold over frames: $grew", grew.zipWithNext().all { (a, b) -> b >= a - 0.5f } && grew.distinct().size >= 8)
+        assertTrue("it did not come back to where it was: ${grew.last()} against $before", Math.abs(grew.last() - before) < 1f)
+        scenario.close()
+    }
+
+    @Test fun workoutRemoveSetClosesTheGapAndUndoOpensIt() {
+        val scenario = openWorkout(listOf(DraftBlock("Bench Press (Barbell)", setsOf(false, false, false))))
+        val start = top(textNodes("Add exercise"))!!
+        val original = model.draft!!
+        val (frames, _) = stepped({ described("Set 2, normal", substring = true)[0].performClick() }, 400) { 0 }
+        saveStrip("workout-remove-dialog", pick(frames, 2, 13), 7)
+        assertTrue("the dialog did not open", textNodes("Remove set").fetchSemanticsNodes().isNotEmpty())
+        val (gone, ys2) = stepped({ textNodes("Remove set")[0].performClick() }, 480) { top(textNodes("Add exercise")).toString() + "/" + model.draft!!.blocks[0].items.size }
+        saveStrip("workout-remove", pick(gone, 2, 13), 7)
+        saveStrip("workout-remove-fine", gone.subList(0, 14), 7)
+        saveStrip("workout-remove-rest", gone.takeLast(4), 4, 1)
+        println("remove sizes: $ys2"); val up = ys2.map { it!!.substringBefore("/").toFloat() }
+        println("remove: Add exercise at $ys2")
+        assertTrue("the gap did not close over frames: $up", up.zipWithNext().all { (a, b) -> b <= a + 0.5f } && up.distinct().size >= 8)
+        assertTrue("the rows below did not rise by a row: ${up.first()} to ${up.last()}", up.first() - up.last() > 40f)
+        assertTrue("the set was not removed", model.draft!!.blocks[0].items.size == 2)
+        val shut = up.last()
+        val (back, ys3) = stepped({ compose.runOnIdle { model.putDraft(original) } }, 480) { top(textNodes("Add exercise")) }
+        saveStrip("workout-undo", pick(back, 2, 13), 7)
+        saveStrip("workout-undo-fine", back.subList(0, 14), 7)
+        saveStrip("workout-undo-rest", back.takeLast(4), 4, 1)
+        val down = ys3.filterNotNull()
+        println("undo: Add exercise at $ys3")
+        assertTrue("the gap did not open over frames: $down", down.zipWithNext().all { (a, b) -> b >= a - 0.5f } && down.distinct().size >= 8)
+        assertTrue("it did not end where it started: ${down.last()} against $start", Math.abs(down.last() - start) < 1f && down.first() <= shut + 1f)
+        scenario.close()
+    }
+
+    @Test fun workoutChangeTypeDialogGrowsFromTheNumber() {
+        val scenario = openWorkout(listOf(DraftBlock("Bench Press (Barbell)", setsOf(false, false, false)), DraftBlock("Squat (Barbell)", setsOf(false, false))))
+        val number = described("Set 2, normal", substring = true)[0].fetchSemanticsNode().boundsInRoot
+        val (frames, boxes) = stepped({ described("Set 2, normal", substring = true)[0].performClick() }, 480) {
+            compose.onAllNodes(androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.PaneTitle), useUnmergedTree = true).fetchSemanticsNodes().firstOrNull()?.boundsInRoot
+        }
+        saveStrip("workout-dialog-open", pick(frames, 2, 13), 7)
+        saveStrip("workout-dialog-rest", frames.takeLast(4), 4, 1)
+        val last = boxes.last()
+        println("dialog items: $boxes")
+        assertTrue("the dialog is not there at rest", last != null)
+        // In the middle of the width and clear of the set it belongs to.
+        assertTrue("the dialog is not centred: $last", Math.abs(last!!.center.x - 200f) < 60f)
+        assertTrue("the dialog covers the set: $last against ${number.top}..${number.bottom}", last.top > number.bottom || last.bottom < number.top)
+        // The set stays lit and in view: its pixels are as before the dialog.
+        val end = frames.last()
+        val rowY = number.center.y.toInt()
+        assertTrue("the set's row was dimmed by the scrim", diff(end.getPixel(6, rowY), frames.first().getPixel(6, rowY)) < 14)
+        // Closing shrinks it back into the number.
+        val (closing, boxes2) = stepped({ scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() } }, 480) {
+            compose.onAllNodes(androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.PaneTitle), useUnmergedTree = true).fetchSemanticsNodes().firstOrNull()?.boundsInRoot
+        }
+        saveStrip("workout-dialog-close", pick(closing, 2, 13), 7)
+        assertTrue("the dialog did not close", boxes2.last() == null)
+        scenario.close()
+    }
+
+    @Test fun calendarEndsAtToday() {
+        val scenario = launch()
+        compose.runOnIdle { model.open(Screen.Calendar()) }
+        compose.waitForIdle()
+        saveStrip("calendar-ends-today", listOf(frame()), 1, 1)
+        val today = java.time.LocalDate.now().dayOfMonth
+        val numbers = compose.onAllNodes(androidx.compose.ui.test.hasText("", substring = true), useUnmergedTree = true).fetchSemanticsNodes()
+            .mapNotNull { n -> n.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text)?.firstOrNull()?.text?.takeIf { it.matches(Regex("\\d{1,2}")) }?.let { it.toInt() to n.boundsInRoot } }
+        val last = numbers.filter { it.first == today }.maxByOrNull { it.second.top }!!
+        val below = numbers.filter { it.second.top > last.second.top + 1f }.map { it.first }
+        println("today $today at ${last.second}; day numbers below it: $below")
+        assertTrue("days after today are drawn: $below", below.isEmpty())
+        assertTrue("a later day of the month is drawn on today's row", numbers.none { it.first > today && Math.abs(it.second.top - last.second.top) < 2f && it.second.left > last.second.left })
+        scenario.close()
+    }
+
     @Test fun tabSwitch() {
         val scenario = launch()
+        // The Activity card's first fill is a wave (activityWave); this is the plain blink, with that first time used up.
+        compose.runOnIdle { model.seen["wave:activity"] = true }
         blink("tab-home-progress") { model.tab = Tab.Progress }
         scenario.close()
     }
@@ -670,8 +857,551 @@ class MotionFramesTest {
         val scenario = launch()
         compose.runOnIdle { model.tab = Tab.Progress }
         compose.waitForIdle()
+        // The calendar's first fill is a wave (calendarWave); this is the blink with that first time used up.
+        compose.runOnIdle { model.seen["wave:calendar"] = true }
         blink("calendar-open") { model.open(Screen.Calendar()) }
         blink("calendar-back") { model.back() }
+        scenario.close()
+    }
+
+    // ---- stage F3: numbers rolling, the range stretching, the ring and days, the calendar's wave, the figure's colours, a page settling in ----
+
+    /** Adds one finished workout [daysAgo] days back (at 08:00) of [sets] sets of [lift], through the same path the seed uses. */
+    private fun addWorkout(daysAgo: Long, lift: String, sets: Int, kg: Int, number: Int = 500 + daysAgo.toInt()) {
+        val header = "\"Workout #\";\"Date\";\"Workout Name\";\"Duration (sec)\";\"Exercise Name\";\"Set Order\";\"Weight (kg)\";\"Reps\";\"RPE\";\"Distance (meters)\";\"Seconds\";\"Notes\";\"Workout Notes\""
+        val date = LocalDateTime.now().minusDays(daysAgo).withHour(8).withMinute(0).withSecond(0).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+        val rows = (1..sets).map { set -> "\"$number\";\"$date\";\"Extra\";\"3600\";\"$lift\";\"$set\";\"$kg.0\";\"10\";\"\";\"\";\"\";\"\";\"\"" }
+        val bytes = (listOf(header) + rows).joinToString("\n", postfix = "\n").toByteArray()
+        runBlocking {
+            val repo = Repo(CleanDb.open(ApplicationProvider.getApplicationContext<android.app.Application>()))
+            val id = model.activeId.value!!
+            repo.commit(id, repo.previewWorkouts(id, bytes))
+        }
+    }
+
+    /** Waits (in real time, the paused clock aside) until [done] holds. */
+    private fun waitReal(what: String, done: () -> Boolean) {
+        var waited = 0
+        while (!done() && waited++ < 200) { Thread.sleep(25); compose.waitForIdle() }
+        assertTrue("never happened: $what", done())
+    }
+
+    /** Like [run] but gives the background work a moment between frames (the figures and totals are worked out off the main thread). */
+    private fun runLive(act: () -> Unit, ms: Int = 800): List<Bitmap> {
+        compose.mainClock.autoAdvance = false
+        compose.mainClock.advanceTimeBy(3000)
+        val frames = mutableListOf(frame())
+        compose.runOnIdle(act)
+        var t = 0
+        while (t < ms) { compose.mainClock.advanceTimeBy(16); Thread.sleep(6); frames += frame(); t += 16 }
+        compose.mainClock.advanceTimeBy(3000)
+        frames += frame()
+        compose.mainClock.autoAdvance = true
+        return frames
+    }
+
+    /** How many pixels of [region] in [a] differ from [b]. */
+    private fun differing(a: Bitmap, b: Bitmap, region: Rect): Int {
+        val pa = pixels(a); val pb = pixels(b)
+        var n = 0
+        for (y in region.top.toInt().coerceAtLeast(0) until region.bottom.toInt().coerceAtMost(a.height)) for (x in region.left.toInt().coerceAtLeast(0) until region.right.toInt().coerceAtMost(a.width)) {
+            if (diff(pa[y * a.width + x], pb[y * a.width + x]) > 12) n++
+        }
+        return n
+    }
+
+    private fun crop(f: Bitmap, r: Rect): Bitmap {
+        val x = r.left.toInt().coerceIn(0, f.width - 1)
+        val y = r.top.toInt().coerceIn(0, f.height - 1)
+        return Bitmap.createBitmap(f, x, y, r.width.toInt().coerceAtMost(f.width - x).coerceAtLeast(1), r.height.toInt().coerceAtMost(f.height - y).coerceAtLeast(1))
+    }
+
+    /** Idea 10: a tile's number that changed while its card was away shows the old figure, then rolls once when the card comes into view. */
+    @Test fun tileNumberRolls() {
+        val scenario = launch(lastFirst = true)
+        compose.runOnIdle { model.tab = Tab.Home }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(1500)
+        fun volumeText() = model.volume(model.workouts.value.filter { it.day >= clean.core.weekStart(java.time.LocalDate.now()).toString() }.sumOf { clean.core.volumeOf(it, model::loadOf) })
+        val old = volumeText()
+        assertTrue("the old volume $old is on Home", textNodes(old).fetchSemanticsNodes().isNotEmpty())
+        val tile = textNodes(old).fetchSemanticsNodes().first().boundsInRoot
+        compose.runOnIdle { model.tab = Tab.Progress }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(1500)
+        addWorkout(0, "Bench Press (Barbell)", 5, 100)
+        waitReal("the new workout is in the list") { model.workouts.value.any { it.name == "Extra" } }
+        val fresh = volumeText()
+        assertTrue("the volume changed ($old, $fresh)", fresh != old)
+        compose.mainClock.advanceTimeBy(1500)
+        // Home is composed beside the tab shown but not seen: it still says what the user last saw.
+        assertTrue("Home shows the old volume until seen", textNodes(old).fetchSemanticsNodes().isNotEmpty() && textNodes(fresh).fetchSemanticsNodes().isEmpty())
+        val frames = run({ model.tab = Tab.Home }, 640)
+        val region = Rect(tile.left - 4f, tile.top - 4f, tile.right + 60f, tile.bottom + 4f)
+        saveStrip("tile-roll", frames.step(2).map { crop(it, Rect(region.left, region.top - 30f, region.right, region.bottom + 30f)) }, 6, 1)
+        saveStrip("tile-roll-full", pick(frames, 4, 11), 6)
+        assertTrue("Home shows the new volume once seen", textNodes(fresh).fetchSemanticsNodes().isNotEmpty() && textNodes(old).fetchSemanticsNodes().isEmpty())
+        // The figure rolls: some frames of the tile are neither the old figure nor the new.
+        val end = frames.last()
+        val mids = frames.indices.filter { differing(frames[it], end, region) > 20 && differing(frames[it], frames.first(), region) > 20 }
+        assertTrue("no frame of the tile is between the old figure and the new one", mids.size >= 3)
+        println("tile roll: ${mids.size} frames in between")
+        // Once per change: away and back again is the figure as it was, no second roll.
+        compose.runOnIdle { model.tab = Tab.Progress }; compose.waitForIdle(); compose.mainClock.advanceTimeBy(1500)
+        val again = run({ model.tab = Tab.Home }, 480)
+        assertTrue("the figure rolled a second time", again.indices.all { differing(again[it], again.last(), region) <= 20 || it < 16 })
+        scenario.close()
+    }
+
+    /** Idea 11: switching 1M / 1Y on the weight page stretches the line along its dates; the last frame of the move is the chart at rest. */
+    @Test fun weightRangeStretches() {
+        val scenario = launch()
+        val format = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+        runBlocking {
+            for ((back, kg) in listOf(300L to 80.0, 200L to 79.0, 130L to 77.5, 90L to 76.0, 50L to 75.2, 20L to 74.0, 12L to 74.6, 5L to 73.5, 1L to 73.0)) {
+                assertTrue("weigh-in", model.addMeasurement("weight.csv", kg, LocalDateTime.now().minusDays(back).withHour(8).withMinute(0).withSecond(0).format(format)))
+            }
+        }
+        compose.runOnIdle { model.setOption("ui.measurementRange", "30") }
+        compose.waitForIdle()
+        compose.runOnIdle { model.open(Screen.MeasurementDetail("weight.csv")) }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(2000)
+        val chart = compose.onNode(androidx.compose.ui.test.hasContentDescription("Chart", substring = true), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val region = Rect(chart.left, chart.top - 8f, chart.right, chart.bottom + 40f)
+        for ((name, to) in listOf("longer" to "365", "shorter" to "30")) {
+            val frames = run({ model.setOption("ui.measurementRange", to) }, 640)
+            saveStrip("weight-range-$name", pick(frames, 2, 17).map { crop(it, region) }, 6)
+            val first = frames.first(); val last = frames.last()
+            assertTrue("weight range $name: nothing changed", differing(first, last, region) > 200)
+            // A move, not a cut: frames in between are neither the old chart nor the new, and it settles.
+            val mids = frames.indices.filter { differing(frames[it], last, region) > 80 && differing(frames[it], first, region) > 80 }
+            assertTrue("weight range $name: it cut ($mids)", mids.size >= 6)
+            val rest = frames.indices.filter { it > frames.size - 8 }
+            assertTrue("weight range $name: the end is not still", rest.all { differing(frames[it], last, region) < 30 })
+            // The chart is not redrawn from nothing: the line is there in the first frames of the move.
+            val soon = frames[2]
+            assertTrue("weight range $name: the chart went blank at the start", differing(soon, first, region) * 3 < region.width.toInt() * region.height.toInt())
+            println("weight range $name: ${mids.size} frames of the move")
+        }
+        scenario.close()
+    }
+
+    /** Idea 12: the week ring fills from where the user last saw it, and the day done since fills with a pop. */
+    @Test fun weekRingAndDays() {
+        val scenario = launch()
+        compose.runOnIdle { model.setWeeklyTarget(7) }
+        compose.waitForIdle()
+        homeCards("week:w,streak:h,volume:h")
+        compose.runOnIdle { model.tab = Tab.Home }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(2000)
+        val before = model.consistency.value!!.now.count
+        val ring = compose.onNode(androidx.compose.ui.test.hasContentDescription("of 7 workouts this week", substring = true), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val today = compose.onNode(androidx.compose.ui.test.hasContentDescription(", today", substring = true), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle { model.tab = Tab.Progress }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(1500)
+        addWorkout(0, "Bench Press (Barbell)", 3, 80)
+        waitReal("the week counts the new workout") { model.consistency.value?.now?.count == before + 1 }
+        compose.mainClock.advanceTimeBy(1500)
+        assertTrue("the ring still says $before while unseen", textNodes("$before / 7").fetchSemanticsNodes().isNotEmpty())
+        val frames = run({ model.tab = Tab.Home }, 960)
+        val ringArea = Rect(ring.left - 4f, ring.top - 4f, ring.right + 4f, ring.bottom + 4f)
+        val dayArea = Rect(today.left - 4f, today.top - 4f, today.right + 4f, today.bottom + 4f)
+        saveStrip("week-ring", frames.step(3).map { crop(it, ringArea) }, 11, 1)
+        saveStrip("week-day-pop", frames.step(2).map { crop(it, dayArea) }, 12, 1)
+        saveStrip("week-card-full", pick(frames, 6, 11), 6)
+        val end = frames.last()
+        val ringMids = frames.indices.filter { differing(frames[it], end, ringArea) > 15 && differing(frames[it], frames.first(), ringArea) > 15 }
+        assertTrue("the ring did not sweep: ${ringMids.size} frames in between", ringMids.size >= 5)
+        val dayMids = frames.indices.filter { differing(frames[it], end, dayArea) > 15 && differing(frames[it], frames.first(), dayArea) > 15 }
+        assertTrue("the day did not fill: ${dayMids.size} frames in between", dayMids.size >= 3)
+        assertTrue("today is marked trained once seen", described(", trained", true).fetchSemanticsNodes().isNotEmpty())
+        println("ring ${ringMids.size} frames, day ${dayMids.size} frames")
+        scenario.close()
+    }
+
+    /** Idea 17: the calendar's squares come in from the top left the first time it opens in a session, and not again. */
+    @Test fun calendarWave() {
+        val scenario = launch(lastFirst = true)
+        compose.runOnIdle { model.tab = Tab.Progress }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(3000)
+        val frames = run({ model.open(Screen.Calendar()) }, 1200)
+        saveStrip("calendar-wave", pick(frames, 4, 17), 6)
+        val rest = frames.last()
+        val w = rest.width; val h = rest.height
+        val upper = Rect(0f, h * 0.2f, w * 0.5f, h * 0.5f)
+        val lower = Rect(w * 0.5f, h * 0.55f, w * 1f, h * 0.9f)
+        // Squares in the top left have come further than those in the bottom right at some frame, and in the end everything is at rest.
+        val total = Pair(maxOf(1, differing(frames.first(), rest, upper)), maxOf(1, differing(frames.first(), rest, lower)))
+        val progress = frames.map { f -> (1f - differing(f, rest, upper).toFloat() / total.first) to (1f - differing(f, rest, lower).toFloat() / total.second) }
+        val ahead = progress.indices.filter { progress[it].first - progress[it].second > 0.2f }
+        assertTrue("the top left never ran ahead of the bottom right: ${progress.map { "%.2f/%.2f".format(it.first, it.second) }}", ahead.size >= 3)
+        assertTrue("the wave is not over after 1.2 s", differing(frames[frames.size - 3], rest, Rect(0f, 0f, w.toFloat(), h.toFloat())) * 500 < w * h)
+        // Later opens do not wave: Back, then open again, is at rest from the first frames the page is shown.
+        compose.runOnIdle { model.back() }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(1500)
+        val again = run({ model.open(Screen.Calendar()) }, 480)
+        val settled = pixels(again.last())
+        saveStrip("calendar-second-open", pick(again, 2, 17), 6)
+        println("second open differs from rest by " + again.map { f -> pixels(f).let { p -> p.indices.count { diff(p[it], settled[it]) > 12 } } })
+        val late = again.drop(14)
+        assertTrue("the second open waved", late.all { f -> pixels(f).let { p -> p.indices.count { diff(p[it], settled[it]) > 12 } * 100 < p.size } })
+        scenario.close()
+    }
+
+    /** The Activity card's squares wave the first time Progress is seen. */
+    @Test fun activityWave() {
+        val scenario = launch(lastFirst = true)
+        compose.mainClock.advanceTimeBy(1500)
+        val frames = run({ model.tab = Tab.Progress }, 1400)
+        saveStrip("activity-wave", pick(frames, 5, 17), 6)
+        val rest = frames.last()
+        val card = cardRect("progress:activity")
+        val moving = frames.indices.filter { differing(frames[it], rest, card) > 100 }
+        assertTrue("the activity squares never moved", moving.size >= 10)
+        assertTrue("it is not at rest at the end", differing(frames[frames.size - 2], rest, card) < 30)
+        scenario.close()
+    }
+
+    /** The calendar opened by the Activity card's morph does not wave: the morph moved it. */
+    @Test fun calendarFromCardDoesNotWave() {
+        val scenario = launch(lastFirst = true)
+        compose.runOnIdle { model.tab = Tab.Progress }
+        compose.waitForIdle()
+        scrollTo("progress:activity")
+        compose.mainClock.advanceTimeBy(3000)
+        val frames = mutableListOf<Bitmap>()
+        trail({ compose.onNodeWithTag("card:progress:activity", useUnmergedTree = true).performTouchInput { click(androidx.compose.ui.geometry.Offset(8f, 8f)) } }, frames, 1400)
+        assertTrue("the card opened its page", model.stack.isNotEmpty())
+        val rest = pixels(frames.last())
+        // 700 ms on, the morph is over; a wave (it runs more than a second) would still be filling squares.
+        for (i in 46 until frames.size - 1) {
+            val p = pixels(frames[i])
+            assertTrue("frame $i still changes after the morph (a wave?)", p.indices.count { diff(p[it], rest[it]) > 12 } * 200 < p.size)
+        }
+        scenario.close()
+    }
+
+    /** Idea 18: the figure's colours ease from the old to the new after a change, instead of snapping. */
+    @Test fun figureColoursEase() {
+        val scenario = launch(lastFirst = true)
+        compose.runOnIdle { model.open(Screen.Body) }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(2500)
+        val figure = compose.onNode(androidx.compose.ui.test.hasContentDescription("Body figure:", substring = true), useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        // The workout is added and the figures worked out with the clock stopped, so the first frame stepped is the first that shows the new colours.
+        compose.mainClock.autoAdvance = false
+        val shot = frame()
+        val before = model.muscleSetCounts.value
+        addWorkout(0, "Squat (Barbell)", 12, 140)
+        waitReal("the figures are worked out again") { model.muscleSetCounts.value != before }
+        val frames = mutableListOf(shot)
+        for (t in 0 until 1200 step 16) { compose.mainClock.advanceTimeBy(16); frames += frame() }
+        compose.mainClock.advanceTimeBy(3000)
+        frames += frame()
+        compose.mainClock.autoAdvance = true
+        saveStrip("figure-ease", pick(frames, 3, 24).map { crop(it, figure) }, 8)
+        val first = frames.first(); val last = frames.last()
+        assertTrue("the figure did not change at all", differing(first, last, figure) > 300)
+        // Measured against the end: the figure goes through several different in-between looks, one after the other.
+        val gaps = frames.map { differing(it, last, figure) }
+        val start = gaps.indexOfFirst { it < gaps.first() - 100 }
+        assertTrue("it never started", start > 0)
+        val distinct = gaps.drop(start).takeWhile { it > 40 }.distinct().size
+        assertTrue("the colours snapped: only $distinct looks between ($gaps)", distinct >= 4)
+        scenario.close()
+    }
+
+    /** Idea 20: a page opened by the blink has its first cards rise one after the other; Back to it does not. */
+    @Test fun pageSettlesIn() {
+        val scenario = launch()
+        compose.runOnIdle { model.tab = Tab.Progress }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(2000)
+        val frames = run({ model.open(Screen.History) }, 640)
+        saveStrip("page-settle", pick(frames, 2, 23), 8)
+        val rest = frames.last()
+        val dates = model.workouts.value.asReversed().take(6).map { it.date }
+        // The cards that are laid out on the screen (a taller phone would show all six).
+        val rects = dates.mapNotNull { d -> compose.onAllNodes(androidx.compose.ui.test.hasTestTag("card:page:history:$d"), useUnmergedTree = true).fetchSemanticsNodes().firstOrNull()?.boundsInRoot?.takeIf { it.bottom < 800f } }
+        assertTrue("only ${rects.size} cards on the screen", rects.size >= 3)
+        // The frame in which a card first looks as it does at rest and stays so.
+        val arrival = rects.map { r -> frames.indices.firstOrNull { i -> (i until frames.size).all { differing(frames[it], rest, r) < 40 } } ?: frames.size }
+        println("arrival frames of the first six cards: $arrival")
+        assertTrue("the cards did not come one after another: $arrival", arrival.zipWithNext().all { (a, b) -> b >= a } && arrival.last() - arrival.first() >= 5)
+        // Back to the page is as it was, with nothing rising.
+        compose.runOnIdle { model.open(Screen.WorkoutDetail(dates.first())) }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(1500)
+        val back = run({ model.back() }, 480)
+        val after = pixels(back.last())
+        for (i in 14 until back.size - 1) {
+            val p = pixels(back[i])
+            assertTrue("Back to History is still moving in frame $i", p.indices.count { diff(p[it], after[it]) > 12 } * 200 < p.size)
+        }
+        scenario.close()
+    }
+
+    // ---- stage F4: the banner into the workout, the tab pill, the exercise underline, a PR badge landing, the coin, the ruler ----
+
+    /** Idea 6: the workout banner on the tab bar grows into the workout page and back, its name and clock travelling to the page's. */
+    @Test fun bannerGrowsIntoTheWorkout() = cardMorph("banner-workout", Tab.Home, BANNER_CARD, shared = listOf("name"), setup = {
+        compose.runOnIdle {
+            model.setOption("rest.seconds", "0")
+            model.putDraft(Draft("Push day", System.currentTimeMillis() - 95_000, listOf(DraftBlock("Bench Press (Barbell)", setsOf(false, false)))))
+        }
+        compose.waitForIdle()
+    }, extra = { listOf("clock") })
+
+    /** The bounds of the tab bar's slot named [label]. */
+    private fun slotRect(label: String): Rect =
+        compose.onAllNodes(androidx.compose.ui.test.hasContentDescription(label), useUnmergedTree = true).fetchSemanticsNodes().map { it.boundsInRoot }.first { it.top > 600f }
+
+    /** The longest run of pixels of colour [colour] along row [y] of [f] between x [from] and [to] (gaps up to [gap] px allowed: an icon in the pill), as its first and last x. */
+    private fun runOf(f: Bitmap, y: Int, from: Int, to: Int, colour: Int, gap: Int = 26): Pair<Int, Int>? {
+        val hits = (from until to).filter { diff(f.getPixel(it, y), colour) < 10 }
+        if (hits.isEmpty()) return null
+        var best = hits[0] to hits[0]
+        var bestCount = 0
+        var start = hits[0]
+        var prev = hits[0]
+        var count = 0
+        for (x in hits) {
+            if (x - prev > gap) { if (count > bestCount) { best = start to prev; bestCount = count }; start = x; count = 0 }
+            prev = x; count++
+        }
+        if (count > bestCount) best = start to prev
+        return best
+    }
+
+    /** Checks a moving indicator's edges over a change: starts at [first], ends at [last], stretches, its leading edge (right going right) is there first, and neither edge goes back. */
+    private fun checkStretch(what: String, edges: List<Pair<Int, Int>>, first: Pair<Int, Int>, last: Pair<Int, Int>) {
+        assertTrue("$what starts at $first, not ${edges.first()}", Math.abs(edges.first().first - first.first) <= 2 && Math.abs(edges.first().second - first.second) <= 2)
+        assertTrue("$what ends at $last, not ${edges.last()}", Math.abs(edges.last().first - last.first) <= 2 && Math.abs(edges.last().second - last.second) <= 2)
+        val rest = first.second - first.first
+        val widest = edges.maxOf { it.second - it.first }
+        assertTrue("$what never stretched: widest $widest against $rest", widest >= rest + 10)
+        val lead = edges.indexOfFirst { it.second >= last.second - 3 }
+        val trail = edges.indexOfFirst { it.first >= last.first - 3 }
+        assertTrue("$what: the leading edge got there in frame $lead and the trailing one in $trail", lead in 0 until trail)
+        assertTrue("$what: an edge went back, $edges", edges.zipWithNext().all { (a, b) -> b.first >= a.first - 2 && b.second >= a.second - 2 })
+    }
+
+    /** Idea 13: the tab bar's pill glides from tab to tab with its leading edge first, and follows a swipe of the pager. */
+    @Test fun tabPillGlidesAndFollowsASwipe() {
+        val scenario = launch()
+        compose.runOnIdle { model.seen["wave:activity"] = true }
+        compose.mainClock.advanceTimeBy(1500)
+        val home = slotRect("Home")
+        val rest = frame()
+        val x0 = (home.center.x - 22f).toInt()
+        val bg = rest.getPixel(home.left.toInt() + 3, home.center.y.toInt())
+        val top = (home.top.toInt() until home.bottom.toInt()).first { diff(rest.getPixel(x0, it), bg) > 6 }
+        val y = top + 16
+        val pill = rest.getPixel(x0, y)
+        val from = home.left.toInt()
+        val to = slotRect("Profile").right.toInt()
+        fun edges(f: Bitmap) = runOf(f, y, from, to, pill)!!
+        val homeEdges = edges(rest)
+        val bar = Rect(0f, home.top - 8f, 400f, home.bottom + 8f)
+        // A tap: Home to Progress.
+        val frames = run({ model.tab = Tab.Progress }, 480)
+        saveStrip("tab-pill-tap", frames.step(2).take(16).map { crop(it, bar) }, 2, 1)
+        val tapEdges = frames.map(::edges)
+        val progress = slotRect("Progress")
+        val atProgress = tapEdges.last()
+        assertTrue("the pill ends at the Progress slot's middle: $atProgress against ${progress.center.x}", Math.abs((atProgress.first + atProgress.second) / 2f - progress.center.x) <= 2f)
+        assertTrue("the pill's width changed at rest: $homeEdges, $atProgress", Math.abs((atProgress.second - atProgress.first) - (homeEdges.second - homeEdges.first)) <= 2)
+        checkStretch("the pill on a tap", tapEdges, homeEdges, atProgress)
+        // A swipe: back to Home first, then the finger drags the pager and the pill goes with it.
+        compose.runOnIdle { model.tab = Tab.Home }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(1500)
+        val page = compose.onNodeWithTag("page:tabs", useUnmergedTree = true)
+        val left = androidx.compose.ui.geometry.Offset(-30f, 0f)
+        page.performTouchInput { down(androidx.compose.ui.geometry.Offset(300f, 300f)); moveBy(left); moveBy(left); moveBy(left) }
+        compose.waitForIdle()
+        val early = frame()
+        val a = edges(early)
+        val more = androidx.compose.ui.geometry.Offset(-60f, 0f)
+        page.performTouchInput { moveBy(more); moveBy(more) }
+        compose.waitForIdle()
+        val later = frame()
+        val b = edges(later)
+        page.performTouchInput { up() }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(1500)
+        val landed = edges(frame())
+        saveStrip("tab-pill-swipe", listOf(rest, early, later, frame()).map { crop(it, bar) }, 1, 1)
+        println("pill on a swipe: rest $homeEdges, early $a, later $b, landed $landed")
+        val restWidth = homeEdges.second - homeEdges.first
+        assertTrue("the pill did not follow the finger (stretched): $a", a.second > homeEdges.second + 8 && a.second - a.first >= restWidth + 8)
+        assertTrue("the pill did not go on with the finger: $b after $a", b.second > a.second + 8 && b.first > a.first + 4)
+        assertTrue("the pill did not land on Progress: $landed against $atProgress", Math.abs(landed.first - atProgress.first) <= 2 && Math.abs(landed.second - atProgress.second) <= 2)
+        // Animations off: a cut.
+        compose.runOnIdle { model.setOption("ui.motion", "off") }
+        compose.waitForIdle()
+        val cut = run({ model.tab = Tab.Profile }, 96)
+        val profile = slotRect("Profile")
+        val first = edges(cut[3])
+        assertTrue("with animations off the pill is at Profile at once: $first against ${profile.center.x}", Math.abs((first.first + first.second) / 2f - profile.center.x) <= 2f && edges(cut.last()) == first)
+        scenario.close()
+    }
+
+    /** The bounds of the exercise page's tab named [label]. */
+    private fun exerciseTab(label: String): Rect =
+        compose.onAllNodes(androidx.compose.ui.test.hasText(label) and androidx.compose.ui.test.hasClickAction()).fetchSemanticsNodes().first().boundsInRoot
+
+    /** Idea 14: the exercise page's underline glides and stretches between its tabs and follows a swipe, and the content slides with the finger. */
+    @Test fun exerciseUnderlineGlidesAndTheContentSlides() {
+        val scenario = launch()
+        compose.runOnIdle { model.open(Screen.ExerciseDetail("Bench Press (Barbell)", tab = 0)) }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(1500)
+        val info = exerciseTab("Info")
+        val rest = frame()
+        val y = info.bottom.toInt() - 1
+        val line = rest.getPixel(info.center.x.toInt(), y)
+        fun edges(f: Bitmap) = runOf(f, y, 0, 400, line, 2)!!
+        val infoEdges = edges(rest)
+        val history = exerciseTab("History")
+        fun listLeft() = compose.onAllNodes(androidx.compose.ui.test.hasScrollAction()).fetchSemanticsNodes().firstOrNull()?.boundsInRoot?.left ?: 0f
+        // A tap: Info to History; the content comes in from the right.
+        val (frames, lefts) = stepped({ compose.onAllNodes(androidx.compose.ui.test.hasText("History") and androidx.compose.ui.test.hasClickAction())[0].performClick() }, 480) { listLeft() }
+        val strip = Rect(0f, info.top - 4f, 400f, info.bottom + 160f)
+        saveStrip("exercise-underline-tap", frames.step(2).take(16).map { crop(it, strip) }, 4, 1)
+        val tapEdges = frames.map(::edges)
+        checkStretch("the underline on a tap", tapEdges, infoEdges, tapEdges.last())
+        assertTrue("the underline ends under History: ${tapEdges.last()} against $history", Math.abs((tapEdges.last().first + tapEdges.last().second) / 2f - history.center.x) <= 3f)
+        println("content left on a tap: ${lefts.step(2)}")
+        assertTrue("the content did not slide in sideways: $lefts", lefts.maxOf { Math.abs(it) } >= 30f && Math.abs(lefts.last()) < 1f)
+        // A swipe: the underline and the content go with the finger, and letting go steps on to Charts.
+        val atHistory = tapEdges.last()
+        val list = compose.onAllNodes(androidx.compose.ui.test.hasScrollAction())[0]
+        val left = androidx.compose.ui.geometry.Offset(-40f, 0f)
+        list.performTouchInput { down(androidx.compose.ui.geometry.Offset(200f, 200f)); moveBy(left); moveBy(left) }
+        compose.waitForIdle()
+        val held = frame()
+        val e = edges(held)
+        list.performTouchInput { up() }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(1500)
+        val charts = exerciseTab("Charts")
+        val landed = edges(frame())
+        saveStrip("exercise-underline-swipe", listOf(rest, held, frame()).map { crop(it, strip) }, 3, 1)
+        println("underline on a swipe: held $e, landed $landed")
+        // The content went with the finger: the left edge of the page under the tabs is not what it is at rest on History.
+        assertTrue("the content did not follow the finger", differing(held, frames.last(), Rect(0f, info.bottom + 10f, 60f, info.bottom + 150f)) > 100)
+        assertTrue("the underline did not follow the finger (stretched): $e from $atHistory", e.second > atHistory.second + 10 && e.second - e.first >= (atHistory.second - atHistory.first) + 10)
+        assertTrue("the underline did not land under Charts: $landed against $charts", Math.abs((landed.first + landed.second) / 2f - charts.center.x) <= 3f)
+        scenario.close()
+    }
+
+    /** The count of light pixels of [region] in [f] (the shimmer's highlight lifts a badge's dark green or amber to a pale one). */
+    private fun whites(f: Bitmap, region: Rect): Int {
+        val p = pixels(f)
+        var n = 0
+        for (y in region.top.toInt().coerceAtLeast(0) until region.bottom.toInt().coerceAtMost(f.height)) for (x in region.left.toInt().coerceAtLeast(0) until region.right.toInt().coerceAtMost(f.width)) {
+            val c = p[y * f.width + x]
+            if ((c shr 16 and 255) > 120 && (c shr 8 and 255) > 120 && (c and 255) > 120) n++
+        }
+        return n
+    }
+
+    /** Idea 15: a PR badge earned by ticking a set lands with the bounce and one shimmer; a badge there when the screen opened does not. */
+    @Test fun newPrBadgeLandsOnce() {
+        // Lat Pulldown has a set done at the start (its badges are there when the screen opens); ticking Bench Press's first set earns new ones.
+        fun set(done: Boolean) = DraftSet(clean.core.SetType.NORMAL, "100", "8", done)
+        val scenario = openWorkout(listOf(DraftBlock("Lat Pulldown (Machine)", listOf(set(true), set(false))), DraftBlock("Bench Press (Barbell)", listOf(set(false), set(false)))))
+        compose.mainClock.advanceTimeBy(1500)
+        val old = described(", new PR", substring = true).fetchSemanticsNodes().map { it.boundsInRoot }
+        assertTrue("the badges of the set done at the start are shown", old.isNotEmpty())
+        val oldRegion = Rect(old.minOf { it.left } - 4f, old.minOf { it.top } - 4f, old.maxOf { it.right } + 4f, old.maxOf { it.bottom } + 4f)
+        val (frames, _) = stepped({ described("Set 1")[1].performClick() }, 640) { 0 }
+        val added = described(", new PR", substring = true).fetchSemanticsNodes().map { it.boundsInRoot }.filter { it.top > oldRegion.bottom - 6f }
+        assertTrue("the ticked set earned badges", added.isNotEmpty())
+        val region = Rect(added.minOf { it.left } - 6f, added.minOf { it.top } - 6f, added.maxOf { it.right } + 6f, added.maxOf { it.bottom } + 6f)
+        saveStrip("pr-badge-land", frames.take(32).map { crop(it, region) }, 8, 1)
+        saveStrip("pr-badge-land-rest", frames.takeLast(3).map { crop(it, region) }, 3, 1)
+        val end = frames.last()
+        // The badge that was there is as it was in every frame (the highlight and tint move in other parts of the row).
+        assertTrue("a badge that was already there moved or flashed", frames.all { differing(it, end, oldRegion) < 40 })
+        // The new one is small at first, bounces and is as at rest once the move is over, with a light highlight crossing it.
+        assertTrue("the new badge was not small at first", differing(frames[2], end, region) > 40)
+        val bright = frames.map { whites(it, region) }
+        println("whites per frame: $bright")
+        assertTrue("no highlight crossed the badge: $bright", bright.max() > bright.last() + 5)
+        val settled = frames.indices.first { i -> (i until frames.size).all { differing(frames[it], end, region) < 30 } }
+        println("the new badge is at rest from frame $settled")
+        assertTrue("the badge was still moving late: frame $settled", settled in 6 until 45)
+        scenario.close()
+    }
+
+    /** Idea 16: a badge, shield or streak earned on the summary flips in like a coin, once. */
+    @Test fun earnedBadgeFlipsInLikeACoin() {
+        val scenario = launch()
+        addWorkout(0, "Bench Press (Barbell)", 3, 60)
+        waitReal("the new workout is in the list") { model.workouts.value.any { it.name == "Extra" } }
+        // A weekly target this one workout meets and without it the week does not.
+        val monday = clean.core.weekStart(java.time.LocalDate.now()).toString()
+        val inWeek = model.workouts.value.count { it.day >= monday }
+        val id = model.activeId.value!!
+        runBlocking { daoNow().put(Kv("goal.week:$id", "2020-01-06:$inWeek")) }
+        waitReal("the target is in") { model.targets.value?.lastOrNull()?.target == inWeek }
+        val date = model.workouts.value.first { it.name == "Extra" }.date
+        // The summary's celebration is worked out off the main thread, so the clock is stepped with a moment of real time between frames; each frame says whether it is on screen yet.
+        compose.mainClock.autoAdvance = false
+        compose.mainClock.advanceTimeBy(3000)
+        val frames = mutableListOf(frame())
+        val shown = mutableListOf(false)
+        fun celebrating() = compose.onAllNodes(androidx.compose.ui.test.hasText("Target hit: ", substring = true), useUnmergedTree = true)
+        compose.runOnIdle { model.open(Screen.Summary(date)) }
+        var t = 0
+        while (t < 1600) { compose.mainClock.advanceTimeBy(16); Thread.sleep(6); frames += frame(); shown += celebrating().fetchSemanticsNodes().isNotEmpty(); t += 16 }
+        compose.mainClock.advanceTimeBy(3000)
+        frames += frame()
+        shown += true
+        compose.mainClock.autoAdvance = true
+        saveStrip("coin-full", pick(frames, 8, 12), 6)
+        val appeared = shown.indexOf(true)
+        assertTrue("the summary did not celebrate: $shown", appeared in 0 until frames.size - 2)
+        val row = celebrating().fetchSemanticsNodes().first().boundsInRoot
+        // The ring with its star, left of the words.
+        val region = Rect(row.left - 90f, row.top - 24f, row.left, row.bottom + 24f)
+        saveStrip("coin-flip", frames.drop(appeared).take(48).step(2).map { crop(it, Rect(0f, region.top, 400f, region.bottom)) }, 4, 1)
+        val end = frames.last()
+        val gaps = frames.drop(appeared).map { differing(it, end, region) }
+        println("celebration shown from frame $appeared; gaps from the ring to rest: $gaps")
+        // The star spins in over the ring's own sweep, so it is not at rest until Motion.COIN is over, and is the same at rest after.
+        val moving = gaps.indexOfLast { it > 20 }
+        assertTrue("the coin was over in only $moving frames: $gaps", moving >= 30)
+        assertTrue("the coin did not turn through different looks: $gaps", gaps.take(moving + 1).distinct().size >= 12)
+        assertTrue("the coin is not at rest at the end: ${gaps.takeLast(5)}", gaps.takeLast(5).all { it < 10 })
+        scenario.close()
+    }
+
+    /** Idea 19: the weight ruler coasts after a fling and settles on a step of 0.05. */
+    @Test fun rulerFlingsAndSettlesOnAStep() {
+        val scenario = launch()
+        compose.runOnIdle { model.logWeight() }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(1500)
+        val ruler = compose.onAllNodes(androidx.compose.ui.test.SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.StateDescription) and androidx.compose.ui.test.hasContentDescription("Body weight"), useUnmergedTree = true)
+        fun value() = ruler[0].fetchSemanticsNode().config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.StateDescription)!!.substringBefore(' ').toDouble()
+        val start = value()
+        ruler[0].performTouchInput { swipe(androidx.compose.ui.geometry.Offset(320f, 20f), androidx.compose.ui.geometry.Offset(80f, 20f), 80) }
+        compose.waitForIdle()
+        val end = value()
+        println("ruler: $start to $end")
+        // The finger moved 240 px = 24 ticks of 10 px = 1.2 kg; the fling carries it further.
+        assertTrue("the ruler did not coast after the finger: $start to $end", end - start > 2.0)
+        assertTrue("the ruler did not settle on a step: $end", Math.abs(end * 20 - Math.round(end * 20)) < 1e-6)
+        compose.mainClock.advanceTimeBy(1000)
+        assertTrue("the value moved after it had settled", value() == end)
         scenario.close()
     }
 }

@@ -88,7 +88,7 @@ fun TemplateScreen(model: AppModel, id: Long) {
                 MainButton(if (model.draft == null) "Start this workout" else "Resume the workout in progress", { if (model.draft == null) model.start(template) else model.resumeWorkout() }, Modifier.fillMaxWidth().padding(Space.l).heightIn(min = 52.dp))
             }
             item {
-                Section("Plan") {
+                Section("Plan", Modifier.settleIn(0)) {
                     LabelValue("Exercises", template.blocks.size.toString())
                     LabelValue("Working sets", working.toString())
                     clean.core.templateDurations(list)[template.name]?.let { LabelValue("Usually takes", clean.core.estimateText(it)) }
@@ -96,7 +96,7 @@ fun TemplateScreen(model: AppModel, id: Long) {
                 }
             }
             item {
-                Section("Exercises") {
+                Section("Exercises", Modifier.settleIn(1)) {
                     // Here the lines are big enough to aim at: each opens its exercise.
                     for (line in lines) LinkRow("${line.sets} × ${line.exercise}", line.last, line.trend) { model.open(Screen.ExerciseDetail(line.exercise)) }
                     if (lines.any { it.trend.isNotEmpty() }) Text(
@@ -106,7 +106,7 @@ fun TemplateScreen(model: AppModel, id: Long) {
                 }
             }
             if (muscles.isNotEmpty()) item {
-                Section("What it trains") {
+                Section("What it trains", Modifier.settleIn(2)) {
                     val palette = scaleColours
                     val most = muscles.values.max()
                     BodyFigure(muscles.mapValues { (_, v) -> shade(palette, v / most) }, { model.open(Screen.MuscleDetail(it)) }) { m ->
@@ -120,7 +120,7 @@ fun TemplateScreen(model: AppModel, id: Long) {
             if (list.isEmpty()) item { Section("History") { Text("No workout has been done under this name yet.", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
             else {
                 item {
-                    Section("History") {
+                    Section("History", Modifier.settleIn(3)) {
                         val days = times.mapNotNull { it?.toLocalDate() }
                         LabelValue("Done", if (list.size == 1) "once" else "${list.size} times") { model.open(Screen.Routine(template.name)) }
                         LabelValue("First", prettyDay(list.first().date)) { model.open(Screen.WorkoutDetail(list.first().date)) }
@@ -140,7 +140,7 @@ fun TemplateScreen(model: AppModel, id: Long) {
                     }
                 }
                 item {
-                    Section("Time and volume") {
+                    Section("Time and volume", Modifier.settleIn(4)) {
                         val longest = list.maxBy { it.durationSeconds }
                         val shortest = list.minBy { it.durationSeconds }
                         val heaviest = volumes.indices.maxBy { volumes[it] }
@@ -154,7 +154,7 @@ fun TemplateScreen(model: AppModel, id: Long) {
                     }
                 }
                 if (list.size >= 2) item {
-                    Section("Last time against the time before") {
+                    Section("Last time against the time before", Modifier.settleIn(5)) {
                         val a = list[list.size - 2]
                         val b = list.last()
                         val volume = volumes.last() - volumes[volumes.size - 2]

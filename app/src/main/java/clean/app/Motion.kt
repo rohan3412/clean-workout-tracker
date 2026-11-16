@@ -3,6 +3,12 @@ package clean.app
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
@@ -142,6 +148,72 @@ object Motion {
     /** The body figure's colours sliding in from the side after a swipe between its views; the grey body stays still. */
     const val VIEW_SLIDE = 300
     fun <T> viewSlide(): TweenSpec<T> = tween(scaled(VIEW_SLIDE), easing = Standard)
+    // The workout screen's moves (2026-11-16): the next-set highlight gliding to the next row, a done tint spreading from the tick, a
+    // finished exercise folding, a set's gap closing or opening, a dialog growing from what was tapped. All on the emphasized curve.
+    const val GLIDE = 300
+    const val SWEEP = 300
+    const val FOLD = 300
+    const val GAP = 300
+    const val DIALOG = 300
+    fun <T> glide(): TweenSpec<T> = tween(scaled(GLIDE), easing = Emphasized)
+    fun <T> sweep(): TweenSpec<T> = tween(scaled(SWEEP), easing = Emphasized)
+    fun <T> gap(): TweenSpec<T> = tween(scaled(GAP), easing = Emphasized)
+    fun <T> dialog(): TweenSpec<T> = tween(scaled(DIALOG), easing = Emphasized)
+    /** A row's idle tint goes only after the done tint has spread over it. */
+    fun <T> afterSweep(): TweenSpec<T> = tween(scaled(QUICK), delayMillis = scaled(SWEEP), easing = Standard)
+    /** Rows folding up into a line, and the line unfolding: the height follows, the content fades and rises a little. [delay] holds a fade-in back while the other side begins to go. */
+    fun foldIn(on: Boolean, delay: Int = 0): EnterTransition = if (!on) EnterTransition.None else
+        expandVertically(tween<IntSize>(scaled(FOLD), easing = Emphasized)) + fadeIn(tween(scaled(FOLD) / 2, delayMillis = scaled(delay), easing = LinearEasing)) +
+            slideInVertically(tween<IntOffset>(scaled(FOLD), easing = Emphasized)) { -it / 10 }
+    fun foldOut(on: Boolean): ExitTransition = if (!on) ExitTransition.None else
+        shrinkVertically(tween<IntSize>(scaled(FOLD), easing = Emphasized)) + fadeOut(tween(scaled(FOLD) / 2, easing = LinearEasing)) +
+            slideOutVertically(tween<IntOffset>(scaled(FOLD), easing = Emphasized)) { -it / 10 }
+    // Stage F3 (2026-11-16): numbers rolling, a chart's range stretching, the calendar's first wave, lists settling in.
+    /** A changed digit sliding up out and the new one in from below. */
+    const val ROLL = 300
+    /** A chart's line (and the Statistics bars) stretching or shrinking to a new range. */
+    const val STRETCH = 400
+    /** The calendar's first fill: each diagonal of squares starts [WAVE_STEP] ms after the one before; a square takes [WAVE_CELL] ms. */
+    const val WAVE_STEP = 45
+    const val WAVE_CELL = 140
+    /** A page's first rows rising into place: [SETTLE_ROWS] of them, each [SETTLE_STEP] ms after the one before, [SETTLE_MS] ms each, from [SETTLE_RISE_DP] dp below. */
+    const val SETTLE_ROWS = 6
+    const val SETTLE_STEP = 30
+    const val SETTLE_MS = 200
+    const val SETTLE_RISE_DP = 8
+    /** The furthest diagonal that waits its turn: squares beyond it come with it, so the wave never takes long on a tall calendar. */
+    const val WAVE_MAX = 20
+    fun waveMillis(): Int = WAVE_MAX * WAVE_STEP + WAVE_CELL
+    /** The wave's clock runs in milliseconds, linear: each square reads its own part of it ([waveCell]). */
+    fun <T> wave(): TweenSpec<T> = tween(waveMillis(), easing = LinearEasing)
+    /** How far square on diagonal [d] has come ([ms] into the wave): 0 hidden, 1 in. */
+    fun waveCell(ms: Float, d: Int): Float = Decelerate.transform(((ms - d.coerceIn(0, WAVE_MAX) * WAVE_STEP) / WAVE_CELL).coerceIn(0f, 1f))
+    fun <T> roll(): TweenSpec<T> = tween(scaled(ROLL), easing = Emphasized)
+    fun <T> stretch(): TweenSpec<T> = tween(scaled(STRETCH), easing = Emphasized)
+    /** One row of a page settling in, [index] rows after the first, held back until the page's blink has brought the page in. */
+    fun <T> settle(index: Int): TweenSpec<T> = tween(scaled(SETTLE_MS), delayMillis = BLINK_OUT_MS + scaled(SETTLE_STEP) * index.coerceIn(0, SETTLE_ROWS), easing = Decelerate)
+    /** How long a page counts as just opened: after it, a row that composes (scrolling, Back) does not rise. */
+    fun settleWindowMillis(): Long = (BLINK_OUT_MS + BLINK_IN_MS + scaled(SETTLE_STEP) * SETTLE_ROWS + scaled(SETTLE_MS) + 100).toLong()
+    // Stage F4 (2026-11-16): the tab bar's pill and the exercise page's underline gliding and stretching, a new PR badge landing, a badge flipping like a coin.
+    /** A moving indicator (the tab bar's pill, an underline) running from one tab to the next. */
+    const val PILL = 350
+    /** The exercise page's content sliding in sideways after a tab change. */
+    const val SLIDE = 300
+    /** One light sweep across a PR badge that has just landed, starting [SHIMMER_AFTER] ms in, when the bounce has made it big enough to see. */
+    const val SHIMMER = 450
+    const val SHIMMER_AFTER = 120
+    /** A badge, shield or streak flipping in on the summary. */
+    const val COIN = 600
+    fun <T> pill(): TweenSpec<T> = tween(scaled(PILL), easing = Emphasized)
+    fun <T> slide(): TweenSpec<T> = tween(scaled(SLIDE), easing = Emphasized)
+    fun <T> shimmer(): TweenSpec<T> = tween(scaled(SHIMMER), delayMillis = scaled(SHIMMER_AFTER), easing = LinearEasing)
+    fun <T> coin(): TweenSpec<T> = tween(scaled(COIN), easing = Emphasized)
+    /**
+     * A moving indicator stretches between two tabs like a liquid: its leading edge runs ahead of its trailing edge and the trailing one
+     * catches up. [t] is how far along the move is, 0 to 1; both are 0 at the start and 1 at the end.
+     */
+    fun stretchLead(t: Float): Float = 1f - (1f - t) * (1f - t)
+    fun stretchTrail(t: Float): Float = t * t
     /** A PR's confetti flying: linear, the pieces carry their own easing. */
     fun <T> confetti(): TweenSpec<T> = tween(scaled(CONFETTI), easing = LinearEasing)
     /** The rest's drain. */

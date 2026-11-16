@@ -56,9 +56,22 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.composed
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.animation.EnterTransition
@@ -143,6 +156,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -419,27 +433,67 @@ fun ActiveScreen(model: AppModel) {
     val grabDefault = with(density) { 34.dp.toPx() }
     var grabPx by remember { mutableStateOf(grabDefault) }
     val edgePx = with(density) { 72.dp.toPx() }
+    // A folded card's name sits this far lower in its row than the unfolded card's (the row is 52 dp, the unfolded one 48), so the folded card starts that much higher.
+    val foldedLift = with(density) { 2.dp.toPx() }
+    // Room above and below the list while it is folded, so the folded list can sit around the held name wherever that is on the screen.
+    var roomTop by remember { mutableStateOf(0f) }
+    var roomBottom by remember { mutableStateOf(0f) }
     val scrollPx = with(density) { 12.dp.toPx() }
     /** The list's entry for the card at [index]; the item before the cards is the title. */
     fun slot(index: Int) = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index + 1 }
+    /** Where an entry's top is on the screen (its offset counts from the list's padded start). */
+    fun top(item: androidx.compose.foundation.lazy.LazyListItemInfo) = item.offset + list.layoutInfo.beforeContentPadding
     /** How far the held card is drawn from its slot. */
-    fun heldOffset(): Float = dragIndex?.let { i -> slot(i)?.let { fingerY - grabPx - it.offset } } ?: settleOffset
+    fun heldOffset(): Float = dragIndex?.let { i -> slot(i)?.let { fingerY - grabPx - top(it) } } ?: settleOffset
     fun dragBy(dy: Float) { if (dragIndex != null) fingerY += dy }
+    /** Gives the list [top] and [bottom] of room at its ends, every card staying where it is on the screen. */
+    fun reroom(top: Float, bottom: Float) {
+        val first = list.layoutInfo.visibleItemsInfo.firstOrNull() ?: return
+        val before = list.layoutInfo.beforeContentPadding
+        val padding = before - roomTop + top
+        roomTop = top
+        roomBottom = bottom
+        list.requestScrollToItem(first.index, (padding - (first.offset + before)).coerceAtLeast(0f).toInt())
+    }
+    /** Cuts the room given at the ends down to what is needed: a blank above the title or below the last entry, when they are on the screen. */
+    fun trimRoom() {
+        val info = list.layoutInfo
+        val low = info.beforeContentPadding - roomTop
+        val title = info.visibleItemsInfo.firstOrNull { it.index == 0 }
+        val footer = info.visibleItemsInfo.firstOrNull { it.index == draft.blocks.size + 1 }
+        reroom(
+            if (title != null) (top(title) - low).coerceAtLeast(0f) else 0f,
+            if (footer != null) (info.viewportSize.height - (top(footer) + footer.size)).toFloat().coerceAtLeast(0f) else 0f,
+        )
+    }
     fun drop() {
         val i = dragIndex ?: return
-        settleOffset = heldOffset()
+        // The cards unfold with the dropped one where it was let go (as far as the list's ends allow).
+        val held = fingerY - grabPx
+        val room = list.layoutInfo.viewportSize.height.toFloat()
+        val low = list.layoutInfo.beforeContentPadding - roomTop
+        roomTop = room
+        roomBottom = room
+        list.requestScrollToItem(i + 1, (low + room - held).coerceAtLeast(0f).toInt())
+        settleOffset = 0f
         dragIndex = null
         dropIndex = i
         settling = scope.launch {
+            withFrameNanos { }
+            withFrameNanos { }
+            trimRoom()
             if (motion) Animatable(settleOffset).animateTo(0f, Motion.short()) { settleOffset = value }
             settleOffset = 0f
             dropIndex = null
         }
     }
     LaunchedEffect(dragIndex != null) {
+        var frames = 0
         while (dragIndex != null) {
             withFrameNanos { }
             val i = dragIndex ?: break
+            // Once the folded list is laid out, the room it was given is cut down to what it needs, with the held card staying where it is.
+            if (++frames == 2) trimRoom()
             // Near the top or bottom the list scrolls, faster the nearer the edge; the card stays under the finger.
             val viewport = list.layoutInfo.viewportSize.height
             val push = when {
@@ -454,8 +508,8 @@ fun ActiveScreen(model: AppModel) {
             val below = slot(i + 1)
             val above = slot(i - 1)
             val by = when {
-                below != null && centre > below.offset + below.size / 2f -> 1
-                above != null && centre < above.offset + above.size / 2f -> -1
+                below != null && centre > top(below) + below.size / 2f -> 1
+                above != null && centre < top(above) + above.size / 2f -> -1
                 else -> 0
             }
             if (by != 0) {
@@ -522,9 +576,11 @@ fun ActiveScreen(model: AppModel) {
     }
 
     val feel = Feel(stored["feedback.tick"] ?: "light", stored["pr.celebrate"] ?: "none", stored["swipe.right"] ?: "finish", stored["swipe.left"] ?: "delete")
-    CompositionLocalProvider(LocalFeel provides feel, LocalDense provides dense) {
+    val rowDialogs = remember { RowDialogs() }
+    CompositionLocalProvider(LocalFeel provides feel, LocalDense provides dense, LocalPad provides pad, LocalRowDialogs provides rowDialogs) {
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
-        modifier = Modifier.imePadding(), containerColor = pageContainer(),
+        modifier = Modifier.closePadOnTap(pad).imePadding(), containerColor = pageContainer(),
         topBar = {
             val now = nowMillis()
             Column(Modifier.sheetBelow().statusBarsPadding()) {
@@ -569,7 +625,9 @@ fun ActiveScreen(model: AppModel) {
             AnimatedVisibility(pad.target != null, enter = Motion.appear(LocalMotion.current), exit = Motion.vanish(LocalMotion.current)) {
                 val rpeOn = model.flag("workout.rpe")
                 val rpeNow = pad.target?.let { t -> (draft.blocks.getOrNull(keys.indexOf(t.card))?.items?.getOrNull(t.item) as? DraftSet)?.rpe }.orEmpty()
-                Keypad(pad.meta, if (rpeOn) rpeNow else null, padActions::key, { value -> padActions.set { it.copy(rpe = value) } }, padActions::next, onHide = pad::close)
+                Box(Modifier.onGloballyPositioned { pad.bounds = it.boundsInWindow() }) {
+                    Keypad(pad.meta, if (rpeOn) rpeNow else null, padActions::key, { value -> padActions.set { it.copy(rpe = value) } }, padActions::next, onHide = pad::close)
+                }
             }
             }
         },
@@ -582,7 +640,7 @@ fun ActiveScreen(model: AppModel) {
             model, workouts, draft, keys, pad, next, pager, low, oneHand, offerUndo,
             { i, b, changed -> blockChanged(i, b, changed) }, { picking = true }, if (early) null else ({ confirm = "cancel" }),
         )
-        else LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = low)) {
+        else LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = low + with(density) { roomTop.toDp() }, bottom = with(density) { roomBottom.toDp() })) {
             item { WorkoutTitle(model, draft) }
             itemsIndexed(draft.blocks, key = { i, _ -> keys[i] }) { index, block ->
                 // Kept between redraws while nothing about it changes, so a key press redraws only the card it changed.
@@ -601,16 +659,22 @@ fun ActiveScreen(model: AppModel) {
                             settling?.cancel()
                             settleOffset = 0f
                             dropIndex = null
-                            // The card is held where it was touched, so it does not jump as it is picked up.
-                            grabPx = grab ?: grabDefault
-                            fingerY = (slot(index)?.offset ?: 0) + grabPx
+                            // The card is held where it was touched, so it does not jump as it is picked up. Its name stays where it is
+                            // on the screen: the folded list is laid out around it, above it the cards before it and below it those after.
+                            grabPx = (grab ?: grabDefault) + foldedLift
+                            fingerY = (slot(index)?.let { top(it) } ?: 0) + grabPx - foldedLift
+                            val room = list.layoutInfo.viewportSize.height.toFloat()
+                            val low = list.layoutInfo.beforeContentPadding - roomTop
+                            roomTop = room
+                            roomBottom = room
+                            list.requestScrollToItem(index + 1, (low + room - (fingerY - grabPx)).coerceAtLeast(0f).toInt())
                             dragIndex = index
                         },
                         drag = ::dragBy, end = ::drop, offset = ::heldOffset,
                         next = isNext, superset = { model.toggleSuperset(index) },
                     )
                 }
-                val glide = if (motion && !held) Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null, placementSpec = Motion.follow()) else Modifier
+                val glide = if (motion && !held) Modifier.animateItem(fadeInSpec = Motion.gap(), fadeOutSpec = Motion.gap(), placementSpec = Motion.follow()) else Modifier
                 BlockCard(model, workouts, block, reorder, keys[index], pad, glide, onSwitch = { model.switchVariation(index, it) }, onUndo = offerUndo) { changed -> blockChanged(index, block, changed) }
             }
             item {
@@ -623,6 +687,8 @@ fun ActiveScreen(model: AppModel) {
         }
         }
         }
+    }
+    RowDialogHost(rowDialogs)
     }
     }
 
@@ -657,15 +723,35 @@ fun ActiveScreen(model: AppModel) {
 /** The workout's name, to rename, over the time it has run (or the day it is logged for). */
 @Composable
 private fun WorkoutTitle(model: AppModel, draft: Draft) {
+    // A workout opened from the banner has the banner's name travelling into it and, on Back, out of it again ([MorphText]). The words must
+    // already be there when Back is pressed, so they stay a text, and become the name's field on a tap, until it is the one being edited.
+    val card = LocalPageCard.current
+    var editing by remember { mutableStateOf(false) }
     Column(Modifier.padding(horizontal = Space.l, vertical = Space.s)) {
-        BasicTextField(
+        val nameStyle = MaterialTheme.typography.headlineSmall.copy(color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
+        if (card != null && !editing) MorphText(
+            androidx.compose.ui.text.AnnotatedString(draft.name), "name", Modifier.clickable(onClickLabel = "Rename workout") { editing = true }, onPage = true, style = nameStyle, maxLines = 1,
+        ) else if (card != null) {
+            val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+            var field by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(draft.name, androidx.compose.ui.text.TextRange(draft.name.length))) }
+            BasicTextField(
+                value = field,
+                onValueChange = { field = it; if (it.text != draft.name) model.putDraft(draft.copy(name = it.text)) },
+                modifier = Modifier.focusRequester(focus),
+                singleLine = true,
+                textStyle = nameStyle,
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            )
+            LaunchedEffect(Unit) { focus.requestFocus() }
+        } else BasicTextField(
             value = draft.name,
             onValueChange = { model.putDraft(draft.copy(name = it)) },
             singleLine = true,
-            textStyle = MaterialTheme.typography.headlineSmall.copy(color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold),
+            textStyle = nameStyle,
             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
         )
-        Text(draft.pastDate?.let { "Logging for " + prettyDate(it) } ?: clock((nowMillis() - draft.startMillis) / 1000), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val clockText = draft.pastDate?.let { "Logging for " + prettyDate(it) } ?: clock((nowMillis() - draft.startMillis) / 1000)
+        MorphText(androidx.compose.ui.text.AnnotatedString(clockText), "clock", onPage = true, color = MaterialTheme.colorScheme.onSurfaceVariant)
         NoteLine(draft.note, { model.putDraft(draft.copy(note = it)) })
     }
 }
@@ -842,6 +928,14 @@ private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBloc
     val focusManager = LocalFocusManager.current
     // The set to do next, when it is in this card.
     val nextItem = if (reorder.next) block.items.indexOfFirst { it is DraftSet && !it.done } else -1
+    // The one highlight on the next set, gliding from row to row; and where a set has just come into the card (Undo, Add set).
+    val skin = workoutSkin()
+    val nextGlide = remember { Glide(nextItem) }
+    val glideMotion = LocalMotion.current
+    LaunchedEffect(nextItem, glideMotion) { nextGlide.go(nextItem, glideMotion) }
+    val arrivals = remember { Arrivals(block.items) }
+    remember(block.items) { arrivals.update(block.items) }
+    fun rowAt(index: Int) = Modifier.onGloballyPositioned { nextGlide.rows[index] = it }
     var resting by remember { mutableStateOf(false) }
     var warming by remember { mutableStateOf(false) }
     var platesFor by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -950,8 +1044,8 @@ private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBloc
                         change.consume()
                         reorderNow.drag(amount.y)
                     }
-                // No ripple while the cards are folded for reordering: the press that picked the card up would stay drawn behind the name.
-                }.clickable(nameSource, if (reorder.collapsed) null else LocalIndication.current) { model.open(Screen.ExerciseDetail(block.exercise, tab = model.workoutExerciseTab.value)) },
+                // No ripple while the cards are folded for reordering: the press that picked the card up would stay drawn behind the name, and its release is not a tap.
+                }.clickable(nameSource, if (reorder.collapsed) null else LocalIndication.current) { if (!reorderNow.collapsed) model.open(Screen.ExerciseDetail(block.exercise, tab = model.workoutExerciseTab.value)) },
                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -1002,7 +1096,8 @@ private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBloc
         ) {
         Column {
             // An exercise with every set ticked takes little room: its sets in a line or two, opening up again when touched.
-            if (compact && finished && !unfolded) {
+            val folded = compact && finished && !unfolded
+            AnimatedVisibility(folded, enter = Motion.foldIn(fold, Motion.FOLD / 3), exit = Motion.foldOut(fold)) {
                 // One short line per set, its number or letter in the set type's colour as in the full rows.
                 Column(Modifier.fillMaxWidth().clickable { unfolded = true }.padding(horizontal = Space.l, vertical = Space.xxs)) {
                     var n = 0
@@ -1020,11 +1115,12 @@ private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBloc
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                    }
                 }
-                if (slot != null) SideEffect { slot.info = null }
-                return@Column
+                }
             }
+            if (folded && slot != null) SideEffect { slot.info = null }
+            AnimatedVisibility(!folded, enter = Motion.foldIn(fold), exit = Motion.foldOut(fold)) {
+            Column(Modifier.onGloballyPositioned { nextGlide.container = it }.drawBehind { nextGlide.draw(this, skin.rowNext) }) {
             // A goal not reached yet, quietly under the name; it leads to the goal on the exercise's page.
             val goal = remember(settings, block.exercise) { parseGoal(settings[block.exercise]?.goal) }
             val goalMet = remember(sessions, goal, loadType, bodyweights, rule) { goal?.let { (kg, reps) -> goalReachedOn(sessions, kg, reps, rule, loadType, bodyweights::at) } }
@@ -1241,7 +1337,7 @@ private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBloc
                             fun half(side: String, w: SetView, mixed: Boolean) = Half(
                                 set = w.item, side = side, spoken = "${w.spoken} ${side.lowercase()}", mixed = mixed,
                                 previous = w.before?.let { setValues(it, unit) }, hintWeight = w.hintWeight, hintReps = w.hintReps,
-                                highlight = w.index == nextItem, focus = w.focus,
+                                highlight = w.index == nextItem, focus = w.focus, bounds = rowAt(w.index),
                                 onFocus = { reps -> focusManager.clearFocus(); pad.focus(id, w.index, reps) },
                                 onPrevious = if (w.before == null) null else ({ replace(w.index, w.item.copy(weight = w.lastWeight.orEmpty(), reps = w.lastReps.orEmpty())) }),
                                 onTick = {
@@ -1300,6 +1396,7 @@ private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBloc
                                 onHalfType = { second, type -> replace(if (second) rightAt!! else index, (block.items[if (second) rightAt!! else index] as DraftSet).copy(type = type)) },
                                 // Both sets go: the swipe and the menu's twin of it.
                                 onRemove = { onChange(block.copy(items = block.items.filterIndexed { i, _ -> i != index && i != rightAt })) },
+                                arrival = arrivals.token(index), items = block.items,
                             )
                             return@forEachIndexed
                         }
@@ -1332,7 +1429,8 @@ private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBloc
                             hintWeight = hintWeight,
                             hintReps = hintReps,
                             record = live[index].orEmpty(),
-                            highlight = index == nextItem,
+                            bounds = rowAt(index),
+                            arrival = arrivals.token(index), items = block.items,
                             focus = v.focus,
                             onFocus = editIt,
                             variations = quick.filter { it != name }.map { it to shortVariation(it, overall) },
@@ -1365,6 +1463,8 @@ private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBloc
                 },
                 Modifier.fillMaxWidth().padding(horizontal = Space.m, vertical = Space.s),
             )
+        }
+        }
         }
         }
     }
@@ -1646,7 +1746,12 @@ private fun SetRow(
     hintReps: String,
     /** What the set has earned, once ticked. */
     record: Set<PrKind>,
-    highlight: Boolean,
+    /** Where the card's next-set highlight finds this row. */
+    bounds: Modifier,
+    /** Non-zero when the set has just come into the card: its gap opens and it slides in. */
+    arrival: Int,
+    /** The card's items as they are now, to know when a removed row has gone from the card. */
+    items: Any,
     /** Which of this row's boxes the number pad is on: 0 for neither, 1 for the weight, 2 for the reps. */
     focus: Int,
     onFocus: (Boolean) -> Unit,
@@ -1664,6 +1769,8 @@ private fun SetRow(
     var menu by remember { mutableStateOf(false) }
     val colors = LocalCleanColors.current
     val motion = LocalMotion.current
+    // A badge earned while this row is on the screen lands with the bounce and a shimmer; those it opened with just are there.
+    val landing = rememberLanding(record)
     // A set just ticked: its box bounces and the phone gives a short buzz.
     val pop = remember { Animatable(1f) }
     var was by remember { mutableStateOf(set.done) }
@@ -1680,28 +1787,45 @@ private fun SetRow(
         }
         was = set.done
     }
-    // The set to do next is tinted with the accent, one that is done with the green of its tick.
+    // The set to do next is lit by the card's one gliding highlight; one that is done has the green of its tick spread over it from the tick.
     val skin = workoutSkin()
-    val tint by animateColorAsState(
-        when {
-            set.done -> skin.rowDone
-            highlight -> skin.rowNext
-            else -> Color.Transparent
-        },
-        animationSpec = Motion.quick(), label = "row",
-    )
     val box by animateColorAsState(if (set.done) skin.tickDone else skin.tickIdle, Motion.quick(), label = "tick")
+    val gap = rememberRowGap(arrival, items)
+    val removeRow = rememberRemoval(gap, items) { onChange(null) }
+    val host = LocalRowDialogs.current
+    // Where the row and its number are, for the dialog that grows from the number.
+    val places = remember { arrayOfNulls<LayoutCoordinates>(2) }
+    // What a tap on the number offers; the same in the phone's menu (the Correct page) and in the dialog of the workout.
+    val typeItems: @Composable (() -> Unit) -> Unit = { close ->
+        for (type in SetType.entries) {
+            DropdownMenuItem({ Text(typeName(type), color = typeColor(type)) }, { close(); onChange(set.copy(type = type)) })
+        }
+        if (variations.isNotEmpty()) {
+            // This set alone as another variation.
+            HorizontalDivider()
+            for ((name, short) in variations) DropdownMenuItem({ Text("As $short") }, { close(); onVariation(name) })
+        }
+        if (onPlates != null) {
+            HorizontalDivider()
+            DropdownMenuItem({ Text("Plates for this weight") }, { close(); onPlates() })
+        }
+        // The swipe's twin, for whoever cannot swipe.
+        HorizontalDivider()
+        DropdownMenuItem({ Text("Remove set", color = colors.danger) }, { close(); removeRow(false) })
+    }
+    Box(Modifier.gapped(gap)) {
     // Swiping the row to the left removes the set.
-    SetSwipe(set.done, onTick, { onChange(null) }) {
+    SetSwipe(set.done, onTick, { removeRow(true) }) {
     Column {
     Row(
-        Modifier.padding(horizontal = Space.xs).prCelebration(PrKind.ONE_RM in record).background(tint, SmallShape).padding(start = Space.xs, end = Space.s, top = if (dense) 1.dp else Space.xs, bottom = if (dense) 1.dp else Space.xs),
+        Modifier.padding(horizontal = Space.xs).prCelebration(PrKind.ONE_RM in record).then(bounds).onGloballyPositioned { places[0] = it }.doneTint(set.done, skin.rowDone).padding(start = Space.xs, end = Space.s, top = if (dense) 1.dp else Space.xs, bottom = if (dense) 1.dp else Space.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // The set's number or letter; tapping it changes the type or removes the set.
         val typeWords = typeName(set.type).lowercase()
         Box(
-            Modifier.width(44.dp).requiredSizeIn(minWidth = 48.dp, minHeight = 48.dp).clickable(onClickLabel = "Change type") { menu = true }
+            Modifier.width(44.dp).requiredSizeIn(minWidth = 48.dp, minHeight = 48.dp).onGloballyPositioned { places[1] = it }
+                .clickable(onClickLabel = "Change type") { if (host != null) host.show(places[1], places[0], "Change type", typeItems) else menu = true }
                 .semantics { contentDescription = "$spoken, $typeWords${if (set.rpe.isEmpty()) "" else ", RPE ${set.rpe}"}. Change type" },
             contentAlignment = Alignment.Center,
         ) {
@@ -1709,23 +1833,7 @@ private fun SetRow(
                 Text(label, color = typeColor(set.type), fontWeight = FontWeight.Bold)
                 if (set.rpe.isNotEmpty()) Text("@${set.rpe}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            DropdownMenu(menu, { menu = false }) {
-                for (type in SetType.entries) {
-                    DropdownMenuItem({ Text(typeName(type), color = typeColor(type)) }, { menu = false; onChange(set.copy(type = type)) })
-                }
-                if (variations.isNotEmpty()) {
-                    // This set alone as another variation.
-                    HorizontalDivider()
-                    for ((name, short) in variations) DropdownMenuItem({ Text("As $short") }, { menu = false; onVariation(name) })
-                }
-                if (onPlates != null) {
-                    HorizontalDivider()
-                    DropdownMenuItem({ Text("Plates for this weight") }, { menu = false; onPlates() })
-                }
-                // The swipe's twin, for whoever cannot swipe.
-                HorizontalDivider()
-                DropdownMenuItem({ Text("Remove set", color = colors.danger) }, { menu = false; onChange(null) })
-            }
+            DropdownMenu(menu, { menu = false }) { typeItems { menu = false } }
         }
         if (!dense) Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1735,7 +1843,7 @@ private fun SetRow(
                 }
             }
             AnimatedVisibility(record.isNotEmpty(), enter = Motion.appear(motion), exit = Motion.vanish(motion)) {
-                PrBadges(record, Modifier.clickable(onClick = onRecord))
+                PrBadges(record, Modifier.clickable(onClick = onRecord), landing = landing)
             }
         }
         // Compact rows have no Previous column to hold the timer, so it sits before the boxes.
@@ -1776,9 +1884,282 @@ private fun SetRow(
     }
     // Without the Previous column the badges sit on a line of their own under the row.
     if (dense) AnimatedVisibility(record.isNotEmpty(), enter = Motion.appear(motion), exit = Motion.vanish(motion)) {
-        PrBadges(record, Modifier.padding(start = 56.dp, end = Space.m, bottom = Space.xxs).clickable(onClick = onRecord))
+        PrBadges(record, Modifier.padding(start = 56.dp, end = Space.m, bottom = Space.xxs).clickable(onClick = onRecord), landing = landing)
     }
     }
+    }
+    }
+}
+
+/**
+ * The next-set highlight of a card, drawn behind its rows as one rectangle: when the set to do next changes it glides from the row it
+ * was on to the new one (`Motion.glide`), fades in where there was none and out when there is no next set. Rows say where they are
+ * ([rows], by the index of the set); the card's own coordinates are [container].
+ */
+private class Glide(initial: Int) {
+    var container: LayoutCoordinates? = null
+    val rows = HashMap<Int, LayoutCoordinates>()
+    private val progress = Animatable(1f)
+    private val alpha = Animatable(if (initial >= 0) 1f else 0f)
+    private var shown = initial
+    private var from: Rect? = null
+    private var last: Rect? = null
+
+    private fun rect(index: Int): Rect? {
+        val c = container?.takeIf { it.isAttached } ?: return null
+        val r = rows[index]?.takeIf { it.isAttached } ?: return null
+        return c.localBoundingBoxOf(r, false)
+    }
+
+    suspend fun go(target: Int, motion: Boolean) {
+        if (target < 0) {
+            if (motion) alpha.animateTo(0f, Motion.quick()) else alpha.snapTo(0f)
+            return
+        }
+        if (target == shown && alpha.value > 0f) {
+            alpha.animateTo(1f, Motion.quick())
+        } else if (alpha.value > 0f && shown >= 0) {
+            from = last
+            shown = target
+            alpha.snapTo(1f)
+            progress.snapTo(0f)
+            if (motion) progress.animateTo(1f, Motion.glide()) else progress.snapTo(1f)
+        } else {
+            from = null
+            shown = target
+            progress.snapTo(1f)
+            if (motion) alpha.animateTo(1f, Motion.quick()) else alpha.snapTo(1f)
+        }
+    }
+
+    fun draw(scope: androidx.compose.ui.graphics.drawscope.DrawScope, color: Color) = with(scope) {
+        val a = alpha.value
+        if (a <= 0f || shown < 0) return@with
+        val to = rect(shown) ?: last ?: return@with
+        val f = from
+        val p = progress.value
+        val r = if (f == null || p >= 1f) to else Rect(
+            f.left + (to.left - f.left) * p, f.top + (to.top - f.top) * p, f.right + (to.right - f.right) * p, f.bottom + (to.bottom - f.bottom) * p,
+        )
+        last = r
+        translate(r.left, r.top) {
+            drawRoundRect(color, size = r.size, cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx()), alpha = a)
+        }
+    }
+}
+
+/**
+ * A done set's tint, spread across the row from the tick's end (the right) over `Motion.SWEEP`; un-ticking fades it as it always did.
+ * With animations off it is there or not.
+ */
+@Composable
+private fun Modifier.doneTint(done: Boolean, color: Color): Modifier {
+    val motion = LocalMotion.current
+    val reveal = remember { Animatable(if (done) 1f else 0f) }
+    val fade = remember { Animatable(if (done) 1f else 0f) }
+    LaunchedEffect(done) {
+        if (done) {
+            fade.snapTo(1f)
+            if (motion) reveal.animateTo(1f, Motion.sweep()) else reveal.snapTo(1f)
+        } else {
+            if (motion) fade.animateTo(0f, Motion.quick()) else fade.snapTo(0f)
+            reveal.snapTo(0f)
+        }
+    }
+    return drawBehind {
+        if (fade.value > 0f) clipRect(left = size.width * (1f - reveal.value)) {
+            drawRoundRect(color, cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx()), alpha = fade.value)
+        }
+    }
+}
+
+/** A set row's own height: closed to nothing when it is removed (the rows below glide up) and opened again when it comes back. */
+private class RowGap {
+    var open by androidx.compose.runtime.mutableFloatStateOf(1f)
+    var hidden by mutableStateOf(false)
+    var entered = 0
+    /** The items of the card when the row was taken out: the row stays shut until the card shows other ones, which takes a frame or two, so it never reopens over the old rows. */
+    var awaiting: Any? = null
+    var removing = false
+}
+
+/** [arrival] is non-zero for a row that has just come into the card: its gap opens and it slides in. */
+@Composable
+private fun rememberRowGap(arrival: Int, items: Any): RowGap {
+    val motion = LocalMotion.current
+    val gap = remember { RowGap() }
+    if (gap.awaiting != null && gap.awaiting !== items) { gap.awaiting = null; gap.open = 1f; gap.hidden = false; gap.removing = false }
+    if (arrival != 0 && arrival != gap.entered) {
+        gap.entered = arrival
+        if (motion) gap.open = 0f
+    }
+    LaunchedEffect(arrival) {
+        if (arrival != 0 && motion && gap.open < 1f) {
+            try { androidx.compose.animation.core.animate(gap.open, 1f, animationSpec = Motion.gap()) { v, _ -> gap.open = v } } finally { gap.open = 1f }
+        }
+    }
+    return gap
+}
+
+/**
+ * Removing the row: it fades (at once when [hide], a swipe having taken it off the screen already) while its height closes, then [remove]
+ * is called and the row below stands where it was.
+ */
+@Composable
+private fun rememberRemoval(gap: RowGap, items: Any, remove: () -> Unit): (Boolean) -> Unit {
+    val itemsNow by rememberUpdatedState(items)
+    val scope = rememberCoroutineScope()
+    val latest by rememberUpdatedState(remove)
+    val motion = LocalMotion.current
+    return { hide ->
+        if (!gap.removing) {
+            gap.removing = true
+            scope.launch {
+                gap.hidden = hide
+                if (motion) androidx.compose.animation.core.animate(gap.open, 0f, animationSpec = Motion.gap()) { v, _ -> gap.open = v }
+                gap.awaiting = itemsNow
+                latest()
+            }
+        }
+    }
+}
+
+private fun Modifier.gapped(gap: RowGap): Modifier = this.layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints)
+    layout(placeable.width, (placeable.height * gap.open).toInt()) { placeable.placeRelative(0, 0) }
+}.graphicsLayer {
+    clip = gap.open < 1f
+    alpha = if (gap.hidden) 0f else gap.open
+    translationX = -(1f - gap.open) * size.width * 0.2f
+}
+
+/** Where a set (or a round) has just come into a card, found by comparing its items with the last ones: the rows there open their gap. */
+private class Arrivals(private var items: List<DraftItem>) {
+    private var from = -1
+    private var to = -1
+    private var serial = 0
+
+    fun update(now: List<DraftItem>): Arrivals {
+        val before = items
+        items = now
+        val n = now.size - before.size
+        if (n in 1..2) {
+            val k = (now.size - n downTo 0).firstOrNull { k -> now.subList(0, k) == before.subList(0, k) && now.subList(k + n, now.size) == before.subList(k, before.size) }
+            if (k != null) { from = k; to = k + n; serial++ }
+        }
+        return this
+    }
+
+    fun token(index: Int) = if (index in from until to) serial else 0
+}
+
+/** What the workout screen shows as a dialog over itself, grown from the thing that was tapped (`RowDialogHost`). */
+private class RowDialog(val anchor: Rect, val row: Rect, val title: String, val content: @Composable (() -> Unit) -> Unit)
+
+private class RowDialogs {
+    var current by mutableStateOf<RowDialog?>(null)
+    var open by mutableStateOf(false)
+
+    /** Opens a dialog from [anchor] (the number that was tapped) for the set row [row], which stays lit and in view. */
+    fun show(anchor: LayoutCoordinates?, row: LayoutCoordinates?, title: String, content: @Composable (() -> Unit) -> Unit) {
+        val a = anchor?.takeIf { it.isAttached }?.boundsInWindow()
+        val r = row?.takeIf { it.isAttached }?.boundsInWindow() ?: a ?: return
+        current = RowDialog(a ?: r, r, title, content)
+        open = true
+    }
+
+    fun close() { open = false }
+}
+
+private val LocalRowDialogs = staticCompositionLocalOf<RowDialogs?> { null }
+
+/**
+ * The dialogs of a set row (a set's "Change type") drawn inside the workout rather than in a window: a scrim with the row cut out of it
+ * and outlined, so the set the dialog belongs to stays visible and lit, and a card that grows from the tapped number to the middle of the
+ * screen (or just under or over the row when the middle would cover it), clipped to its growing bounds, and shrinks back on close. Back
+ * and a tap outside close it. Without animations it is there or not.
+ */
+@Composable
+private fun RowDialogHost(host: RowDialogs) {
+    val dialog = host.current ?: return
+    val motion = LocalMotion.current
+    val p = remember(dialog) { Animatable(if (motion) 0f else 1f) }
+    LaunchedEffect(dialog, host.open) {
+        if (host.open) { if (motion) p.animateTo(1f, Motion.dialog()) else p.snapTo(1f) }
+        else {
+            if (motion) p.animateTo(0f, Motion.dialog()) else p.snapTo(0f)
+            if (host.current === dialog) host.current = null
+        }
+    }
+    BackHandler(host.open) { host.close() }
+    val scheme = MaterialTheme.colorScheme
+    val mono = LocalLook.current.mono
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    val cardRect = remember { arrayOf(Rect.Zero) }
+    Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInWindow() }) {
+        val row = dialog.row.translate(-origin)
+        val anchor = dialog.anchor.translate(-origin)
+        // The scrim, with the row's place cut out and ringed.
+        Box(
+            Modifier.fillMaxSize().graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+                .drawBehind {
+                    drawRect(Color.Black.copy(alpha = 0.32f * p.value))
+                    val m = 3.dp.toPx()
+                    val tl = Offset(row.left - m, row.top - m)
+                    val sz = Size(row.width + 2 * m, row.height + 2 * m)
+                    val radius = androidx.compose.ui.geometry.CornerRadius(11.dp.toPx())
+                    drawRoundRect(Color.Black, tl, sz, radius, blendMode = androidx.compose.ui.graphics.BlendMode.Clear)
+                    drawRoundRect(scheme.primary.copy(alpha = p.value), tl, sz, radius, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+                }
+                .clickable(remember { MutableInteractionSource() }, null) { host.close() },
+        )
+        Box(
+            Modifier.fillMaxSize()
+                .drawWithContent {
+                    val q = p.value
+                    val c = cardRect[0]
+                    fun mix(a: Float, b: Float) = a + (b - a) * q
+                    val box = Rect(mix(anchor.left, c.left), mix(anchor.top, c.top), mix(anchor.right, c.right), mix(anchor.bottom, c.bottom))
+                    val path = androidx.compose.ui.graphics.Path().apply {
+                        addRoundRect(androidx.compose.ui.geometry.RoundRect(box, androidx.compose.ui.geometry.CornerRadius(mix(8.dp.toPx(), 24.dp.toPx()))))
+                    }
+                    clipPath(path) { this@drawWithContent.drawContent() }
+                }
+                .layout { measurable, constraints ->
+                    val margin = 24.dp.roundToPx()
+                    val maxW = (constraints.maxWidth - 2 * margin).coerceIn(0, 360.dp.roundToPx())
+                    val gap = 12.dp.roundToPx()
+                    val wanted = measurable.maxIntrinsicHeight(maxW).coerceAtMost(constraints.maxHeight - 2 * margin)
+                    val below = row.bottom.toInt() + gap
+                    val roomBelow = constraints.maxHeight - margin - below
+                    val roomAbove = row.top.toInt() - gap - margin
+                    // Centred, unless that would cover the set: then just under it, or over it; with no room for the whole card either side it takes the larger room and scrolls.
+                    var height = wanted
+                    var y = (constraints.maxHeight - wanted) / 2
+                    if (y < row.bottom + gap && y + wanted > row.top - gap) {
+                        if (wanted <= roomBelow) y = below
+                        else if (wanted <= roomAbove) y = row.top.toInt() - gap - wanted
+                        else if (roomBelow >= roomAbove) { height = roomBelow.coerceAtLeast(0); y = below }
+                        else { height = roomAbove.coerceAtLeast(0); y = margin }
+                    }
+                    val placeable = measurable.measure(androidx.compose.ui.unit.Constraints(maxWidth = maxW, maxHeight = height))
+                    val x = (constraints.maxWidth - placeable.width) / 2
+                    cardRect[0] = Rect(x.toFloat(), y.toFloat(), (x + placeable.width).toFloat(), (y + placeable.height).toFloat())
+                    layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(x, y) }
+                },
+        ) {
+            Surface(
+                Modifier.clickable(remember { MutableInteractionSource() }, null) { }
+                    .semantics { paneTitle = dialog.title },
+                shape = clean.app.ui.theme.SheetShape, color = scheme.surfaceContainerHigh,
+                border = if (mono) BorderStroke(1.dp, scheme.onSurface) else null,
+            ) {
+                Column(Modifier.graphicsLayer { alpha = ((p.value - 0.2f) / 0.5f).coerceIn(0f, 1f) }.verticalScroll(rememberScrollState()).padding(vertical = Space.l)) {
+                    Text(dialog.title, Modifier.padding(horizontal = Space.xl, vertical = Space.s).semantics { heading() }, style = MaterialTheme.typography.titleLarge)
+                    dialog.content { host.close() }
+                }
+            }
+        }
     }
 }
 
@@ -1806,6 +2187,8 @@ private class Half(
     /** Last time's matching set, as text; null when there was none. */
     val previous: String?,
     val hintWeight: String, val hintReps: String, val highlight: Boolean, val focus: Int,
+    /** Where the card's next-set highlight finds this half. */
+    val bounds: Modifier,
     val onFocus: (Boolean) -> Unit, val onPrevious: (() -> Unit)?, val onTick: () -> Unit,
 )
 
@@ -1820,6 +2203,9 @@ private fun PairRow(
     label: String, spoken: String, type: SetType?, rpe: String, unit: String, loadType: LoadType,
     left: Half, right: Half?, records: List<Pair<PrKind, Set<Side>>>, onRecord: () -> Unit,
     variations: List<Pair<String, String>>, onVariation: (String) -> Unit, onPlates: (() -> Unit)?, onType: (SetType) -> Unit, onHalfType: (Boolean, SetType) -> Unit, onRemove: () -> Unit,
+    /** Non-zero when the round has just come into the card: its gap opens and it slides in. */
+    arrival: Int = 0,
+    items: Any = Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     // The side whose own kind is being changed, if any.
@@ -1827,14 +2213,48 @@ private fun PairRow(
     val colors = LocalCleanColors.current
     val dense = LocalDense.current
     val motion = LocalMotion.current
+    val gap = rememberRowGap(arrival, items)
+    val landing = rememberLanding(records.mapTo(HashSet()) { it.first })
+    val removeRow = rememberRemoval(gap, items, onRemove)
+    val host = LocalRowDialogs.current
+    // Where the round and its number are, for the dialogs that grow from the number.
+    val places = remember { arrayOfNulls<LayoutCoordinates>(2) }
+    // The side whose kind is changed on its own: a dialog of the workout, or the window one where there is none (the Correct page).
+    fun askSide(side: Side) {
+        val half = if (side == Side.LEFT) left else right ?: left
+        if (host != null) host.show(places[1], places[0], "${if (side == Side.LEFT) "Left" else "Right"} side: change type") { close ->
+            SideTypeChoices(half) { close(); onHalfType(side == Side.RIGHT, it) }
+        } else sideType = side
+    }
+    val typeItems: @Composable (() -> Unit) -> Unit = { close ->
+        for (t in SetType.entries) DropdownMenuItem({ Text(typeName(t), color = typeColor(t)) }, { close(); onType(t) })
+        // One side on its own (a hold on a half does the same).
+        if (right != null) {
+            HorizontalDivider()
+            DropdownMenuItem({ Text("Left side type…") }, { close(); askSide(Side.LEFT) })
+            DropdownMenuItem({ Text("Right side type…") }, { close(); askSide(Side.RIGHT) })
+        }
+        if (variations.isNotEmpty()) {
+            HorizontalDivider()
+            for ((name, short) in variations) DropdownMenuItem({ Text("As $short") }, { close(); onVariation(name) })
+        }
+        if (onPlates != null) {
+            HorizontalDivider()
+            DropdownMenuItem({ Text("Plates for this weight") }, { close(); onPlates() })
+        }
+        HorizontalDivider()
+        DropdownMenuItem({ Text("Remove set", color = colors.danger) }, { close(); removeRow(false) })
+    }
     // A swipe acts on the round as one half at a time: the first half not done, else (all done) the last one is un-ticked.
     val swipeHalf = if (!left.set.done) left else if (right != null && !right.set.done) right else right ?: left
-    SetSwipe(swipeHalf.set.done, swipeHalf.onTick, onRemove) {
+    Box(Modifier.gapped(gap)) {
+    SetSwipe(swipeHalf.set.done, swipeHalf.onTick, { removeRow(true) }) {
       Column {
-        Row(Modifier.padding(horizontal = Space.xs).prCelebration(records.any { it.first == PrKind.ONE_RM }).padding(start = Space.xs, end = Space.s, top = if (dense) 1.dp else Space.xs, bottom = if (dense) 1.dp else Space.xs), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(horizontal = Space.xs).prCelebration(records.any { it.first == PrKind.ONE_RM }).onGloballyPositioned { places[0] = it }.padding(start = Space.xs, end = Space.s, top = if (dense) 1.dp else Space.xs, bottom = if (dense) 1.dp else Space.xs), verticalAlignment = Alignment.CenterVertically) {
             val typeWords = type?.let { typeName(it).lowercase() } ?: "left ${typeName(left.set.type).lowercase()}, right ${right?.set?.type?.let(::typeName)?.lowercase()}"
             Box(
-                Modifier.width(44.dp).requiredSizeIn(minWidth = 48.dp, minHeight = 48.dp).clickable(onClickLabel = "Change type") { menu = true }
+                Modifier.width(44.dp).requiredSizeIn(minWidth = 48.dp, minHeight = 48.dp).onGloballyPositioned { places[1] = it }
+                    .clickable(onClickLabel = "Change type") { if (host != null) host.show(places[1], places[0], "Change type", typeItems) else menu = true }
                     .semantics { contentDescription = "$spoken, $typeWords${if (rpe.isEmpty()) "" else ", RPE $rpe"}. Change type" },
                 contentAlignment = Alignment.Center,
             ) {
@@ -1842,38 +2262,22 @@ private fun PairRow(
                     Text(label, color = type?.let { typeColor(it) } ?: Color.Unspecified, fontWeight = FontWeight.Bold)
                     if (rpe.isNotEmpty()) Text("@$rpe", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                DropdownMenu(menu, { menu = false }) {
-                    for (t in SetType.entries) DropdownMenuItem({ Text(typeName(t), color = typeColor(t)) }, { menu = false; onType(t) })
-                    // One side on its own (a hold on a half does the same).
-                    if (right != null) {
-                        HorizontalDivider()
-                        DropdownMenuItem({ Text("Left side type…") }, { menu = false; sideType = Side.LEFT })
-                        DropdownMenuItem({ Text("Right side type…") }, { menu = false; sideType = Side.RIGHT })
-                    }
-                    if (variations.isNotEmpty()) {
-                        HorizontalDivider()
-                        for ((name, short) in variations) DropdownMenuItem({ Text("As $short") }, { menu = false; onVariation(name) })
-                    }
-                    if (onPlates != null) {
-                        HorizontalDivider()
-                        DropdownMenuItem({ Text("Plates for this weight") }, { menu = false; onPlates() })
-                    }
-                    HorizontalDivider()
-                    DropdownMenuItem({ Text("Remove set", color = colors.danger) }, { menu = false; onRemove() })
-                }
+                DropdownMenu(menu, { menu = false }) { typeItems { menu = false } }
             }
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(SIDES_GAP)) {
-                SideHalf(left, unit, loadType, Modifier.weight(1f)) { sideType = Side.LEFT }
-                if (right != null) SideHalf(right, unit, loadType, Modifier.weight(1f)) { sideType = Side.RIGHT } else Spacer(Modifier.weight(1f))
+                SideHalf(left, unit, loadType, Modifier.weight(1f)) { askSide(Side.LEFT) }
+                if (right != null) SideHalf(right, unit, loadType, Modifier.weight(1f)) { askSide(Side.RIGHT) } else Spacer(Modifier.weight(1f))
             }
         }
         AnimatedVisibility(records.isNotEmpty(), enter = Motion.appear(motion), exit = Motion.vanish(motion)) {
             PrBadges(
                 records.mapTo(HashSet()) { it.first }, Modifier.padding(start = 56.dp, end = Space.m, bottom = Space.xs).clickable(onClick = onRecord),
                 sides = records.toMap(),
+                landing = landing,
             )
         }
       }
+    }
     }
     sideType?.let { side ->
         val half = if (side == Side.LEFT) left else right ?: left
@@ -1881,18 +2285,17 @@ private fun PairRow(
         CleanDialog(
             onDismissRequest = { sideType = null },
             title = { Text("$name side: change type") },
-            text = {
-                Column {
-                    for (t in SetType.entries) TextButton(
-                        onClick = { sideType = null; onHalfType(side == Side.RIGHT, t) },
-                        Modifier.fillMaxWidth().minTouch(),
-                    ) {
-                        Text(typeName(t) + if (t == half.set.type) " (now)" else "", Modifier.fillMaxWidth(), color = typeColor(t))
-                    }
-                }
-            },
+            text = { Column { SideTypeChoices(half) { sideType = null; onHalfType(side == Side.RIGHT, it) } } },
             confirmButton = { TextButton(onClick = { sideType = null }) { Text("Cancel") } },
         )
+    }
+}
+
+/** The kinds one half of a round can be, the one it is now marked. */
+@Composable
+private fun SideTypeChoices(half: Half, onPick: (SetType) -> Unit) {
+    for (t in SetType.entries) TextButton(onClick = { onPick(t) }, Modifier.fillMaxWidth().minTouch()) {
+        Text(typeName(t) + if (t == half.set.type) " (now)" else "", Modifier.fillMaxWidth(), color = typeColor(t))
     }
 }
 
@@ -1919,13 +2322,10 @@ private fun SideHalf(h: Half, unit: String, loadType: LoadType, modifier: Modifi
         was = h.set.done
     }
     val skin = workoutSkin()
+    // The faint tile of a half that is neither next (the card's gliding highlight lights that one) nor done (its tint spreads over the tile, which goes after).
     val tint by animateColorAsState(
-        when {
-            h.set.done -> skin.rowDone
-            h.highlight -> skin.rowNext
-            else -> skin.rowIdleHalf
-        },
-        animationSpec = Motion.quick(), label = "half",
+        if (h.highlight || h.set.done) Color.Transparent else skin.rowIdleHalf,
+        animationSpec = if (h.set.done) Motion.afterSweep() else Motion.quick(), label = "half",
     )
     val box by animateColorAsState(if (h.set.done) skin.tickDone else skin.tickIdle, Motion.quick(), label = "tick")
     val (weightWord, repsWord) = when (loadType) {
@@ -1937,7 +2337,7 @@ private fun SideHalf(h: Half, unit: String, loadType: LoadType, modifier: Modifi
     val repsUnit = if (loadType == LoadType.CARDIO) "minutes" else if (loadType == LoadType.TIMED) "seconds" else "reps"
     // A hold on the half (its padding and its quiet line) changes its kind on its own; the boxes and the tick keep their taps.
     Column(
-        modifier.background(tint, SmallShape)
+        modifier.background(tint, SmallShape).then(h.bounds).doneTint(h.set.done, skin.rowDone)
             .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onLongClickLabel = "Change type", onLongClick = onChangeType, onClick = {})
             .padding(horizontal = Space.xs, vertical = if (dense) 1.dp else Space.xs),
     ) {
@@ -2002,6 +2402,10 @@ private class Pad {
     /** Until a key is pressed in a box just entered, the first digit replaces what is there. */
     var fresh = true
 
+    /** Where the pad itself is drawn and where each weight or reps box is, in the window; a tap anywhere else closes the pad. */
+    var bounds: Rect? = null
+    val fields = HashMap<Any, Rect>()
+
     /** The one way the pad goes away: no box is left in edit mode. What was typed stays in the box. */
     fun close() {
         target = null
@@ -2011,6 +2415,39 @@ private class Pad {
     fun focus(card: String, item: Int, reps: Boolean) {
         target = PadTarget(card, item, reps)
         fresh = true
+    }
+}
+
+/** The pad of the workout screen on show, for its boxes to say where they are. */
+private val LocalPad = staticCompositionLocalOf<Pad?> { null }
+
+/**
+ * With the number pad up, a touch landing anywhere outside the pad and the boxes closes it, at the touch down: a tap, a scroll or a
+ * swipe alike. The touch is not consumed, so a scroll or swipe carries on under the finger; only the release of a plain tap is taken,
+ * so a tap does nothing but close the pad. A touch on a box moves the edit to it as ever.
+ */
+private fun Modifier.closePadOnTap(pad: Pad): Modifier = composed {
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    this.onGloballyPositioned { origin = it.positionInWindow() }.pointerInput(pad) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            if (pad.target == null) return@awaitEachGesture
+            val at = down.position + origin
+            if (pad.bounds?.contains(at) == true || pad.fields.values.any { it.contains(at) }) return@awaitEachGesture
+            pad.close()
+            // A touch that is a tap has done its work in closing the pad: its release is taken so nothing under it is pressed.
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val change = event.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+                val far = (change.position - down.position).getDistance() > viewConfiguration.touchSlop
+                val long = change.uptimeMillis - down.uptimeMillis > viewConfiguration.longPressTimeoutMillis
+                if (event.changes.size > 1 || far || long) return@awaitEachGesture
+                if (!change.pressed) {
+                    change.consume()
+                    return@awaitEachGesture
+                }
+            }
+        }
     }
 }
 
@@ -2024,8 +2461,11 @@ private fun PadField(value: String, placeholder: String, focused: Boolean, modif
         if (focused) requester.bringIntoView()
     }
     val skin = workoutSkin()
+    val pad = LocalPad.current
+    val me = remember { Any() }
+    if (pad != null) DisposableEffect(pad) { onDispose { pad.fields.remove(me) } }
     Box(
-        modifier.bringIntoViewRequester(requester).clip(SmallShape).background(skin.boxFill)
+        modifier.onGloballyPositioned { if (pad != null) pad.fields[me] = it.boundsInWindow() }.bringIntoViewRequester(requester).clip(SmallShape).background(skin.boxFill)
             .border(if (focused) skin.focusWidth else skin.lineWidth, if (focused) skin.focusBorder else skin.boxBorder, SmallShape)
             .clickable(onClickLabel = "Edit", onClick = onClick).semantics { contentDescription = description }.padding(vertical = Space.s, horizontal = Space.xs),
         contentAlignment = Alignment.Center,
@@ -2218,9 +2658,9 @@ fun CorrectScreen(model: AppModel) {
     // A swipe that would tick a set does nothing here; one that removes still removes.
     fun noFinish(kind: String) = if (kind == "finish") "off" else kind
     val feel = Feel(stored["feedback.tick"] ?: "light", "none", noFinish(stored["swipe.right"] ?: "finish"), noFinish(stored["swipe.left"] ?: "delete"))
-    CompositionLocalProvider(LocalFeel provides feel, LocalDense provides (stored["workout.rows"] == "compact"), LocalDraftSlot provides slot) {
+    CompositionLocalProvider(LocalFeel provides feel, LocalDense provides (stored["workout.rows"] == "compact"), LocalDraftSlot provides slot, LocalPad provides pad) {
         Scaffold(
-            modifier = Modifier.imePadding(), containerColor = pageContainer(),
+            modifier = Modifier.closePadOnTap(pad).imePadding(), containerColor = pageContainer(),
             topBar = {
                 // The page's own bar, as every page has; Back asks first when something was changed.
                 BackBar("Correct workout", ::leave) {
@@ -2231,7 +2671,9 @@ fun CorrectScreen(model: AppModel) {
                 AnimatedVisibility(pad.target != null, enter = Motion.appear(LocalMotion.current), exit = Motion.vanish(LocalMotion.current)) {
                     val rpeOn = model.flag("workout.rpe")
                     val rpeNow = pad.target?.let { t -> (draft.blocks.getOrNull(keys.indexOf(t.card))?.items?.getOrNull(t.item) as? DraftSet)?.rpe }.orEmpty()
-                    Keypad(pad.meta, if (rpeOn) rpeNow else null, actions::key, { value -> actions.set { it.copy(rpe = value) } }, actions::next, onHide = pad::close)
+                    Box(Modifier.onGloballyPositioned { pad.bounds = it.boundsInWindow() }) {
+                        Keypad(pad.meta, if (rpeOn) rpeNow else null, actions::key, { value -> actions.set { it.copy(rpe = value) } }, actions::next, onHide = pad::close)
+                    }
                 }
             },
         ) { padding ->

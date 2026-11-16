@@ -196,7 +196,7 @@ private fun TotalsCard(model: AppModel, half: Boolean) {
 private fun TotalCell(total: Total, modifier: Modifier) {
     Column(modifier.clickable(onClick = total.onClick).semantics(mergeDescendants = true) {}, verticalArrangement = Arrangement.spacedBy(Space.xxs)) {
         Caption(total.label)
-        Text(total.value, style = MaterialTheme.typography.titleLarge.numbers(), fontWeight = FontWeight.SemiBold)
+        RollingText(total.value, "total:${total.label}", MaterialTheme.typography.titleLarge.numbers(), fontWeight = FontWeight.SemiBold)
         total.spark?.takeIf { it.size >= 2 }?.let { Sparkline(it, Modifier.padding(top = Space.xs)) }
     }
 }

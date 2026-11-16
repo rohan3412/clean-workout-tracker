@@ -54,6 +54,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import clean.app.ui.theme.cardTopShape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 
@@ -304,7 +307,7 @@ fun App(model: AppModel = viewModel()) {
     // Once after an update, over whatever page the app opened on.
     model.whatsNew?.let { WhatsNewPopup(it) { model.closeWhatsNew() } }
     // Every chart can ask for the full screen through this.
-    CompositionLocalProvider(LocalFullChart provides { chart -> model.fullChart = chart; model.open(Screen.Chart) }) {
+    CompositionLocalProvider(LocalFullChart provides { chart -> model.fullChart = chart; model.open(Screen.Chart) }, LocalSeen provides model.seen) {
     val motion = LocalMotion.current
     val cards = remember { CardBounds() }
     val clip = remember { MorphClip() }
@@ -328,7 +331,7 @@ fun App(model: AppModel = viewModel()) {
     val card: String? = remember(onTabs) {
         val key = model.cardKeyOf(if (onTabs) lastBottom[0] else model.stack.firstOrNull())
         val spot = key?.let { cards.onScreen(it, window.width.toFloat(), window.height.toFloat()) }
-        if (!motion || key == null || spot == null || tabOfCard(key) != model.tab) null
+        if (!motion || key == null || spot == null || (tabOfCard(key) != model.tab && !key.startsWith("banner:"))) null
         else { clip.begin(spot, Size(window.width.toFloat(), window.height.toFloat())); key }
     }
     // The card change is under way until its clock has run (and a little over); pages and cards take part in it only until then.
@@ -409,7 +412,10 @@ fun App(model: AppModel = viewModel()) {
         val growing = transition.animateFloat({ if (still) snap() else Motion.cardBounds(true) }, "grown") { if (it == EnterExitState.Visible) 1f else 0f }
         val beneath = transition.animateFloat({ if (still) snap() else Motion.cardBounds(true) }, "under") { if (it == EnterExitState.Visible) 0f else 1f }
         val pageProgress = if (grownFrom != null) growing else beneath
-        CompositionLocalProvider(LocalPageScope provides this, LocalPageCard provides pageCard, LocalPageProgress provides pageProgress) {
+        // A page just opened by the blink lets its first rows rise (Roll.kt); once its window has run, rows composed later do not.
+        val settle = screen?.let { model.settles[it.toString()] }
+        LaunchedEffect(settle) { if (settle != null && settle.armed) { delay(Motion.settleWindowMillis()); settle.armed = false } }
+        CompositionLocalProvider(LocalPageScope provides this, LocalPageCard provides pageCard, LocalPageProgress provides pageProgress, LocalSettle provides settle) {
         pages.SaveableStateProvider(screen?.toString()?.also { kept.add(it) } ?: "none") {
         Box(Modifier.fillMaxSize().then(if (screen == null) Modifier else Modifier.testTag("page:" + screen::class.simpleName)).cardTarget(pageCard, if (grownFrom != null) pageMorphing else morphing)) {
         // Linen draws a white sheet under the pages that have a bar; the tabs, the full-screen chart and photos, and the arrange pages do not.
@@ -505,22 +511,28 @@ private fun ClashSheet(model: AppModel) {
 
 /** The bar that shows a workout is in progress, with its clock or the rest counting down; a tap goes to it. For the first five minutes it also has Cancel. */
 @Composable
-fun WorkoutBanner(model: AppModel, shape: Shape = cardTopShape()) {
+fun WorkoutBanner(model: AppModel, shape: Shape = cardTopShape(), morph: Boolean = false) {
     val draft = model.draft ?: return
     val now = nowMillis()
     var cancelling by remember { mutableStateOf(false) }
     val rest = model.restEnd?.let { (it - now) / 1000 }?.takeIf { it > 0 }
+    // The banner docked on the tab bar is a card of the tabs page: the workout grows out of it and shrinks back into it, its name and clock travelling to the page's.
+    CompositionLocalProvider(LocalCardKey provides if (morph) BANNER_CARD else null) {
+    val open = cardTap { model.resumeWorkout() }
     Surface(
         color = MaterialTheme.colorScheme.primaryContainer, shape = shape,
-        modifier = Modifier.fillMaxWidth().clickable { model.resumeWorkout() },
+        modifier = Modifier.fillMaxWidth().opensInto(null, MaterialTheme.colorScheme.primaryContainer, square = true).clickable(onClick = open),
     ) {
         Column {
             // Always a finger's height, so the bar does not change size when Cancel goes after five minutes; the clock stays at the right edge.
             Row(Modifier.heightIn(min = 48.dp).padding(horizontal = Space.l), horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
                 Icon(CleanIcons.Dumbbell, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                Text(draft.name, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
+                MorphText(draft.name, "name", Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (draft.isEarly(now)) DangerButton("Cancel", { cancelling = true }, Modifier.minTouch())
-                Text(if (rest != null) "Rest ${clock(rest)}" else clock((now - draft.startMillis) / 1000), style = LocalTextStyle.current.numbers(), fontWeight = FontWeight.SemiBold)
+                MorphText(
+                    androidx.compose.ui.text.AnnotatedString(if (rest != null) "Rest ${clock(rest)}" else clock((now - draft.startMillis) / 1000)), "clock",
+                    style = LocalTextStyle.current.numbers(), fontWeight = FontWeight.SemiBold,
+                )
             }
             // The rest draining away along the bottom edge.
             val end = model.restEnd
@@ -528,6 +540,7 @@ fun WorkoutBanner(model: AppModel, shape: Shape = cardTopShape()) {
                 Box(Modifier.fillMaxWidth(((end - now) / (model.restTotal * 1000f)).coerceIn(0f, 1f)).height(3.dp).background(MaterialTheme.colorScheme.primary))
             }
         }
+    }
     }
     if (cancelling) Confirm("Cancel workout?", "Everything entered in this workout is thrown away.", "Discard", { model.cancelWorkout() }) { cancelling = false }
 }
@@ -607,7 +620,15 @@ private fun Tabs(model: AppModel) {
             }
             // The bar belongs to the tabs page: it goes and comes back in the same blink as the page, or under a growing card slides away with it.
             val barOut = LocalBarOut.current
-            TabBar(model, order, ends[order[pager.currentPage.coerceIn(order.indices)]] == true, banner, nav, Modifier.align(Alignment.BottomCenter).graphicsLayer { translationY = (barOut?.value ?: 0f) * (size.height + 48.dp.toPx()) })
+            // The workout banner growing into the workout stays where it is: the bar is under the growing container anyway, and the banner's own bounds are the container's start.
+            val bannerOpens = LocalMorphCard.current?.startsWith("banner:") == true
+            TabBar(
+                model, order, ends[order[pager.currentPage.coerceIn(order.indices)]] == true, banner, nav,
+                Modifier.align(Alignment.BottomCenter).graphicsLayer { translationY = if (bannerOpens) 0f else (barOut?.value ?: 0f) * (size.height + 48.dp.toPx()) },
+                // A swipe moves the pill with the finger; a tap's blink glides it on its own clock.
+                follow = { if (pager.isScrollInProgress && blink.value == BLINK_REST) pager.currentPage + pager.currentPageOffsetFraction else null },
+                morph = true,
+            )
         }
     }
 }
@@ -620,24 +641,54 @@ private fun Tabs(model: AppModel) {
  * [current] is the tab drawn as selected; Settings' live preview draws the bar with one that is not the app's own, under a layer that takes no touch.
  */
 @Composable
-internal fun TabBar(model: AppModel, order: List<Tab>, settled: Boolean, banner: Boolean, nav: Dp, modifier: Modifier, current: Tab = model.tab) {
+internal fun TabBar(
+    model: AppModel, order: List<Tab>, settled: Boolean, banner: Boolean, nav: Dp, modifier: Modifier, current: Tab = model.tab,
+    follow: () -> Float? = { null }, morph: Boolean = false,
+) {
     val floating = if (settled) 0f else 1f
     val corner = 24.dp
-    val black = LocalLook.current.blackTabBar
+    val look = LocalLook.current
+    val black = look.blackTabBar
+    // One pill glides behind the slots (Motion.pill) from the old tab to the new, its leading edge first, or follows a swipe (follow, in tabs).
+    val span = rememberStretch(order.indexOf(current).coerceAtLeast(0), follow)
+    val spot = remember { PillSpot() }
+    val scheme = MaterialTheme.colorScheme
+    val pillColour = if (look.tabWords) (if (black) ComposeColor.White else scheme.secondaryContainer) else (if (black) ComposeColor.White.copy(alpha = 0.14f) else scheme.secondaryContainer)
     Surface(
         modifier.fillMaxWidth().padding(horizontal = Space.l * floating).padding(bottom = (BAR_GAP + nav) * floating),
         shape = RoundedCornerShape(corner * floating),
         color = if (black) BlackBar else MaterialTheme.colorScheme.surfaceContainer, border = if (black) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Column {
-            if (banner) WorkoutBanner(model, RectangleShape)
+            if (banner) WorkoutBanner(model, RectangleShape, morph)
             // Five slots of one width, so every word keeps its place and the middle one is the bar's centre.
-            Row(Modifier.fillMaxWidth().height(BAR_HEIGHT).padding(horizontal = Space.xs), verticalAlignment = Alignment.CenterVertically) {
-                for (tab in order) if (tab == Tab.Workout) WorkoutButton(model, current == Tab.Workout) else TabItem(model, tab, current == tab)
+            Row(
+                Modifier.fillMaxWidth().height(BAR_HEIGHT).padding(horizontal = Space.xs)
+                    .onGloballyPositioned { spot.rowY = it.positionInRoot().y }
+                    .drawBehind {
+                        val top = spot.boxY - spot.rowY
+                        if (top.isNaN()) return@drawBehind
+                        val s = span()
+                        val slot = size.width / order.size
+                        val inset = if (look.tabWords) Space.xxs.toPx() else (slot - INDICATOR_WIDTH.toPx()) / 2f
+                        val left = s.left { it * slot + inset }
+                        val right = s.right { (it + 1) * slot - inset }
+                        val height = INDICATOR_HEIGHT.toPx()
+                        drawRoundRect(pillColour, androidx.compose.ui.geometry.Offset(left, top), Size(right - left, height), androidx.compose.ui.geometry.CornerRadius(height / 2f))
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                for ((i, tab) in order.withIndex()) if (tab == Tab.Workout) WorkoutButton(model, current == Tab.Workout) else TabItem(model, tab, current == tab, i, span, spot)
             }
             Spacer(Modifier.height(nav * (1f - floating)))
         }
     }
+}
+
+/** Where the slots' own boxes sit, in the window, so the one pill that glides behind them is drawn at the same height. */
+internal class PillSpot {
+    var rowY by androidx.compose.runtime.mutableFloatStateOf(Float.NaN)
+    var boxY by androidx.compose.runtime.mutableFloatStateOf(Float.NaN)
 }
 
 /** The pill behind a tab's icon (Material 3's active indicator) or its word. */
@@ -685,21 +736,23 @@ private fun TabWord(label: String, tint: ComposeColor, selected: Boolean) {
  * otherwise). Icons and words: an outline icon in a pill that fills when selected, the word under it. A hold opens the Navigation page.
  */
 @Composable
-private fun RowScope.TabItem(model: AppModel, tab: Tab, selected: Boolean) {
+private fun RowScope.TabItem(model: AppModel, tab: Tab, selected: Boolean, index: Int, span: () -> Span, spot: PillSpot) {
     val look = LocalLook.current
     val black = look.blackTabBar
     val scheme = MaterialTheme.colorScheme
     val onClick = { model.tab = tab }
     val hold = { model.open(Screen.Navigation) }
+    // How much of this slot the gliding pill covers: the word or icon changes colour as the pill reaches it, not when the tab is chosen.
+    val cover = span().cover(index)
+    val lit = cover > 0.5f
+    fun mix(off: ComposeColor, on: ComposeColor) = androidx.compose.ui.graphics.lerp(off, on, cover)
     if (look.tabWords) {
-        val pillColour = if (black) ComposeColor.White else scheme.secondaryContainer
-        val pill = if (selected) pillColour else pillColour.copy(alpha = 0f)
-        val tint = if (black) (if (selected) BlackBar else BlackBarQuiet) else if (selected) scheme.onSecondaryContainer else scheme.onSurfaceVariant
+        val tint = if (black) mix(BlackBarQuiet, BlackBar) else mix(scheme.onSurfaceVariant, scheme.onSecondaryContainer)
         TabSlot(selected, tab.label, onClick, hold) { source ->
             Box(
-                Modifier.fillMaxWidth().padding(horizontal = Space.xxs).height(INDICATOR_HEIGHT).clip(CircleShape).background(pill).indication(source, LocalIndication.current),
+                Modifier.fillMaxWidth().padding(horizontal = Space.xxs).height(INDICATOR_HEIGHT).clip(CircleShape).onGloballyPositioned { spot.boxY = it.positionInRoot().y }.indication(source, LocalIndication.current),
                 contentAlignment = Alignment.Center,
-            ) { TabWord(tab.label, tint, selected) }
+            ) { TabWord(tab.label, tint, lit) }
         }
     } else {
         val icon = when (tab) {
@@ -708,17 +761,15 @@ private fun RowScope.TabItem(model: AppModel, tab: Tab, selected: Boolean) {
             Tab.Exercises -> CleanIcons.TabList
             else -> CleanIcons.TabPerson
         }
-        val pillColour = if (black) ComposeColor.White.copy(alpha = 0.14f) else scheme.secondaryContainer
-        val pill = if (selected) pillColour else pillColour.copy(alpha = 0f)
-        val tint = if (black) (if (selected) ComposeColor.White else BlackBarQuiet) else if (selected) scheme.onSecondaryContainer else scheme.onSurfaceVariant
-        val wordTint = if (black) (if (selected) ComposeColor.White else BlackBarQuiet) else if (selected) scheme.onSurface else scheme.onSurfaceVariant
+        val tint = if (black) mix(BlackBarQuiet, ComposeColor.White) else mix(scheme.onSurfaceVariant, scheme.onSecondaryContainer)
+        val wordTint = if (black) mix(BlackBarQuiet, ComposeColor.White) else mix(scheme.onSurfaceVariant, scheme.onSurface)
         TabSlot(selected, tab.label, onClick, hold) { source ->
             Box(
-                Modifier.size(INDICATOR_WIDTH, INDICATOR_HEIGHT).clip(CircleShape).background(pill).indication(source, LocalIndication.current),
+                Modifier.size(INDICATOR_WIDTH, INDICATOR_HEIGHT).clip(CircleShape).onGloballyPositioned { spot.boxY = it.positionInRoot().y }.indication(source, LocalIndication.current),
                 contentAlignment = Alignment.Center,
             ) { Icon(icon, null, Modifier.size(24.dp), tint = tint) }
             Spacer(Modifier.height(Space.xxs))
-            TabWord(tab.label, wordTint, selected)
+            TabWord(tab.label, wordTint, lit)
         }
     }
 }

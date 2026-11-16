@@ -40,7 +40,7 @@ fun TrendsScreen(model: AppModel) {
         val focus = remember { TREND_TITLES.indexOfFirst { lines?.containsKey("$from/chart:$it/card") == true } }
         LazyColumn(Modifier.padding(padding).fillMaxSize(), rememberLazyListState(initialFirstVisibleItemIndex = if (focus > 0) focus + 1 else 0)) {
             item {
-                Section("") {
+                Section("", Modifier.settleIn(0)) {
                     RangeChoice(listOf(90L, 365L, 0L), days, { if (it == 90L) "3M" else if (it == 365L) "1Y" else "All" }) { range = it.toString() }
                     Text("One point a week, Monday to Sunday. A week with no workout counts as nothing, so a break shows as a dip.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -54,7 +54,7 @@ fun TrendsScreen(model: AppModel) {
                 Triple("Working sets a week", "sets", shown.map { it.monday to it.sets.toDouble() }),
             )
             for ((title, unit, points) in charts) item(key = title) {
-                Section(title) {
+                Section(title, Modifier.settleIn(1 + TREND_TITLES.indexOf(title))) {
                     if (weeks.size < 3) EmptyPreview("Log ${3 - weeks.size} more ${if (weeks.size == 2) "week" else "weeks"} of workouts to see this.") { PreviewSamples.Line() }
                     else if (points.size < 3) Text("Not enough weeks in this period to draw a line.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     else {
