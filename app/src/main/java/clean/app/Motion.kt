@@ -56,13 +56,43 @@ object Motion {
 
     // The blink (2026-10-20, the user's words: "just make everything the simple blink animation"). Every screen-level change, a
     // tab, a page and Back, a sheet, dialog, picker or the Undo bar, and a thing appearing or going, is one quick fade through in
-    // place: the old is gone in BLINK_OUT_MS, then the new fades in over BLINK_IN_MS. Nothing slides, grows, shrinks or moves, the
+    // place: the old is gone in BLINK_OUT_MS, then the new fades in over BLINK_IN_MS. Nothing slides, grows, shrinks or moves (but a card
+    // opening its page, below), the
     // look's speed does not touch it, and with animations off (the app's or the phone's) it is a cut. Both at 0 is an instant cut.
 
     /** The old screen fading out... */
     const val BLINK_OUT_MS = 60
     /** ...then the new one fading in, after it. */
     const val BLINK_IN_MS = 90
+
+    // The one exception, from 2026-11-16 at the user's word ("it should be like morph animation, borders should grow out, elements
+    // inside should morph out and up into the new position"): a card opening the page it belongs to is a container transform, and
+    // Back is its exact reverse. One clock for all of it: the container's bounds, the elements that move from the card to the page,
+    // the card's own content fading out and the page's fading in, the corners and the outline, the tab bar leaving.
+
+    /** A card growing into its page, and the page shrinking into its card; the look's speed does not touch it. */
+    const val CARD_TO_PAGE = 400
+    /** The share of [CARD_TO_PAGE] in which the card's own content is gone (opening) or comes back (going back); the page's takes the rest. */
+    const val CARD_FADE_SHARE = 0.3f
+    /** The share of the way the container has grown after which its outline fades; the outline is gone when it has the page's size. */
+    const val OUTLINE_FADE_FROM = 0.75f
+    /** Material 3's emphasized decelerate, played backwards: Back retraces an opening frame for frame. */
+    val DecelerateReversed = CubicBezierEasing(0.9f, 0f, 0.95f, 0.3f)
+
+    /** The container's bounds, and everything that moves with them: emphasized decelerate opening, the same curve reversed going back. */
+    fun <T> cardBounds(forward: Boolean): TweenSpec<T> = tween(CARD_TO_PAGE, easing = if (forward) Decelerate else DecelerateReversed)
+    private const val CARD_FADE_MS = (CARD_TO_PAGE * CARD_FADE_SHARE).toInt()
+    /** Opening, the card's content is gone in the first [CARD_FADE_SHARE]; going back it returns in the last. */
+    fun cardContentOut(): TweenSpec<Float> = tween(CARD_FADE_MS, easing = Accelerate)
+    fun cardContentIn(): TweenSpec<Float> = tween(CARD_FADE_MS, delayMillis = CARD_TO_PAGE - CARD_FADE_MS, easing = Decelerate)
+    /** Opening, the page's content fades in over the rest; going back it fades out first, over the same span reversed. */
+    fun pageContentIn(): TweenSpec<Float> = tween(CARD_TO_PAGE - CARD_FADE_MS, delayMillis = CARD_FADE_MS, easing = Decelerate)
+    fun pageContentOut(): TweenSpec<Float> = tween(CARD_TO_PAGE - CARD_FADE_MS, easing = Accelerate)
+    /** What is on both the card and the page but not alike (a title, a number, a chart) crosses over while it travels. */
+    fun morphIn(): TweenSpec<Float> = tween(CARD_TO_PAGE / 2, delayMillis = CARD_TO_PAGE / 4, easing = LinearEasing)
+    fun morphOut(): TweenSpec<Float> = tween(CARD_TO_PAGE / 2, delayMillis = CARD_TO_PAGE / 4, easing = LinearEasing)
+    /** The tabs page stays under the growing container until it is done (opening), and is there from the first frame going back. */
+    fun <T> tabsHold(forward: Boolean): TweenSpec<T> = if (forward) tween(1, delayMillis = CARD_TO_PAGE) else tween(1)
 
     fun <T> blinkOutSpec(): TweenSpec<T> = tween(BLINK_OUT_MS, easing = LinearEasing)
     /** The incoming half, starting [delay] ms in: after the outgoing half for a swap, at once for a thing appearing on its own. */

@@ -161,8 +161,8 @@ fun HomeTab(model: AppModel) {
                 // Holding a card opens Arrange Home.
                 val row: @Composable (List<HomeEntry>) -> Unit = { segment ->
                     Box(Modifier.onHold { haptic.performHapticFeedback(HapticFeedbackType.LongPress); arrange(segment.first().card.key) }) {
-                        if (segment.first().wide) HomeCardContent(model, segment.first(), templates, workouts)
-                        else HalfCards(even) { for (e in segment) Box { HomeCardContent(model, e, templates, workouts) } }
+                        if (segment.first().wide) OpenableCard(segment.first()) { HomeCardContent(model, segment.first(), templates, workouts) }
+                        else HalfCards(even) { for (e in segment) Box { OpenableCard(e) { HomeCardContent(model, e, templates, workouts) } } }
                     }
                 }
                 segments.firstOrNull()?.let { first -> item(key = first.first().card.key) { row(first) } }
@@ -185,6 +185,11 @@ internal fun arrangeAnchorOf(state: LazyListState, listTop: Float, held: String?
     return item.key as String to listTop + item.offset
 }
 
+
+/** Names the card so that, if it opens a page, the page grows out of it (see [opensInto]). Only Home's own list does this, not Arrange Home's copy. */
+@Composable
+private fun OpenableCard(entry: HomeEntry, content: @Composable () -> Unit) =
+    CompositionLocalProvider(LocalCardKey provides "home:${entry.card.key}", content = content)
 
 /** What a card shows, at the width it has been given. */
 @Composable

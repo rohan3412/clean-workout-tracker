@@ -821,7 +821,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                     Section("Notes") { for ((date, text) in notes.take(40)) LinkRow(text, prettyDay(date), "") { model.open(Screen.WorkoutDetail(date)) } }
                 }
             }
-            if (tab == CHARTS) item {
+            if (tab == CHARTS) item { Box(Modifier.morphs("chart:1rm")) {
                 // Each chart is one value per session; only the ones this kind of exercise has are offered.
                 val charts: List<Triple<String, String, (Progress) -> Double?>> = when (loadType) {
                     LoadType.TIMED -> listOf(
@@ -873,7 +873,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                     )
                   }
                 }
-            }
+            } }
             if (tab == PRS) item {
                 Section("PRs") {
                     if (sessions.isEmpty()) Text("Not logged yet.")

@@ -1223,7 +1223,22 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
         viewModelScope.launch { activeId.collect { id -> if (id != null) fixIsoRowHistoryOnce(id) } }
     }
 
-    fun open(screen: Screen) { stack.add(screen) }
+    /** The card whose own tap is being handled right now, set only for the length of that tap: a page opened inside it grows out of that card. */
+    private var pressedCard: String? = null
+    /** The card each page was opened from, by the page's name; kept after Back, so a page can shrink into its card and a later Back finds it. */
+    private val cardOf = HashMap<String, String>()
+    /** Runs [tap] (the card's own click) with [key] as the card pressed; a page it opens grows out of that card (see [opensInto]). Never a row or button inside a card. */
+    fun fromCard(key: String?, tap: () -> Unit) {
+        pressedCard = key
+        try { tap() } finally { pressedCard = null }
+    }
+    fun cardKeyOf(screen: Screen?): String? = screen?.let { cardOf[it.toString()] }
+
+    fun open(screen: Screen) {
+        val key = pressedCard?.takeIf { screen != Screen.EditHome && screen != Screen.EditProfile && screen != Screen.Active }
+        if (key != null) cardOf[screen.toString()] = key else cardOf.remove(screen.toString())
+        stack.add(screen)
+    }
     fun back() { stack.removeLastOrNull() }
     /** The card Arrange Home or Arrange profile should open on and where its top was on screen (px from the window's top), so the page keeps the place the list was scrolled to; taken once by the arrange page. */
     var arrangeAnchor: Pair<String, Float>? = null

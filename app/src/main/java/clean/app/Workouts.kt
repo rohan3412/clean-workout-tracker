@@ -259,7 +259,7 @@ fun WorkoutCard(workout: Workout, model: AppModel, volume: Double, records: Doub
             // Nothing inside the card takes a tap of its own: the lines are too small to aim at, so the whole card opens the workout.
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 colors.ofName(workout.name)?.let { TemplateDot(it) }
-                Text(workout.name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                MorphText(androidx.compose.ui.text.AnnotatedString(workout.name), "title", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (records > 0) Badge(prsText(records))
             }
             Text(

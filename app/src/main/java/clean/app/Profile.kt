@@ -104,8 +104,8 @@ fun ProfileTab(model: AppModel) {
             // Holding a card opens Arrange profile.
             items(segments, key = { it.first().card.key }) { segment ->
                 Box(Modifier.onHold { haptic.performHapticFeedback(HapticFeedbackType.LongPress); arrange(segment.first().card.key) }) {
-                    if (segment.first().wide) ProfileCardContent(model, segment.first())
-                    else HalfCards(even) { for (e in segment) Box { ProfileCardContent(model, e) } }
+                    if (segment.first().wide) OpenableProfileCard(model, segment.first())
+                    else HalfCards(even) { for (e in segment) Box { OpenableProfileCard(model, e) } }
                 }
             }
             item { QuietButton("Arrange profile", { arrange(null) }, Modifier.padding(horizontal = Space.l, vertical = Space.s)) }
@@ -123,6 +123,11 @@ fun EditProfileScreen(model: AppModel) {
     ) { ProfileCardContent(model, it) }
 }
 
+
+/** Names the card so that, if it opens a page, the page grows out of it (see [opensInto]). Only Profile's own list does this, not Arrange profile's copy. */
+@Composable
+private fun OpenableProfileCard(model: AppModel, entry: CardEntry<ProfileCard>) =
+    CompositionLocalProvider(LocalCardKey provides "profile:${entry.card.key}") { ProfileCardContent(model, entry) }
 
 /** What a card shows, at the width it has been given. */
 @Composable

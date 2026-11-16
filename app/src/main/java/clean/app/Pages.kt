@@ -95,9 +95,9 @@ private val MONTH_TITLE: DateTimeFormatter = DateTimeFormatter.ofPattern("MMMM y
 
 /** A row that leads somewhere: a title with a line under it, and a value on the right. */
 @Composable
-fun LinkRow(title: String, subtitle: String, value: String, spoken: String? = null, onClick: () -> Unit) {
+fun LinkRow(title: String, subtitle: String, value: String, spoken: String? = null, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).then(if (spoken != null) Modifier.semantics(mergeDescendants = true) { contentDescription = spoken } else Modifier).padding(vertical = Space.xs),
+        modifier.fillMaxWidth().clickable(onClick = onClick).then(if (spoken != null) Modifier.semantics(mergeDescendants = true) { contentDescription = spoken } else Modifier).padding(vertical = Space.xs),
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {

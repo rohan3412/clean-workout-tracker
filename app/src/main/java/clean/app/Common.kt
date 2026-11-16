@@ -188,7 +188,7 @@ fun BackBar(title: String, onBack: () -> Unit, actions: @Composable () -> Unit =
     val look = LocalLook.current
     if (look.sheetPage) RegisterSheetBar()
     TopAppBar(
-        title = { Text(title, Modifier.semantics { heading() }, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = if (look.twoToneTitles) FontWeight.SemiBold else null) },
+        title = { MorphText(title, "title", Modifier.semantics { heading() }, onPage = true, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = if (look.twoToneTitles) FontWeight.SemiBold else null) },
         navigationIcon = { if (look.sheetPage) HeaderButton(CleanIcons.Back, "Back", onBack) else IconButton(onClick = onBack) { Icon(CleanIcons.Back, "Back") } },
         actions = { if (look.sheetPage) HeaderActions { actions() } else actions() },
         // On the page colour in Linen, where the sheet begins under the bar.
@@ -230,19 +230,22 @@ fun Section(title: String, modifier: Modifier = Modifier, spacing: Dp = Space.s,
     val shape = cardShape()
     val tinted = hero && look.heroTint > 0f
     val fill = if (!tinted) card else if (look.cardAlpha < 1f) primary.copy(alpha = look.heroTint) else lerp(card, primary, look.heroTint)
+    val edge = if (hero && look.heroOutlineAccent()) BorderStroke(look.outlineWidth.dp, primary.copy(alpha = 0.35f)) else cardBorder()
+    val tap = if (onClick != null) cardTap(onClick) else null
     Card(
         // A card that opens something is pressed as a whole: it dips, and the ripple keeps to its corners.
         modifier = Modifier.fillMaxWidth().then(if (LocalHalfCard.current) Modifier else Modifier.padding(horizontal = Space.l, vertical = outer * scale)).then(modifier)
             .then(if (look.shadow) Modifier.shadow(3.dp, shape, clip = false) else Modifier)
-            .then(if (onClick != null) Modifier.clip(shape).pressable(onClick = onClick) else Modifier),
+            .then(if (tap != null) Modifier.clip(shape).pressable(onClick = tap) else Modifier),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = fill),
-        border = if (hero && look.heroOutlineAccent()) BorderStroke(look.outlineWidth.dp, primary.copy(alpha = 0.35f)) else cardBorder(),
+        border = edge,
     ) {
         // [spacing] is the gap between the lines of the card; lists of sets ask for a tight one.
-        Column {
+        // The card's content, not its surface, is what moves when it opens a page: the surface stays under the growing container.
+        Column(if (tap != null) Modifier.opensInto(edge, fill) else Modifier) {
             Column(Modifier.padding(horizontal = Space.l, vertical = inner * scale), verticalArrangement = Arrangement.spacedBy(spacing * scale)) {
-                if (title.isNotEmpty()) SectionTitle(title)
+                if (title.isNotEmpty()) SectionTitle(title, role = "title")
                 content()
             }
             // A chart that runs to the card's left, right and bottom edges; the card's shape clips it.
@@ -253,8 +256,8 @@ fun Section(title: String, modifier: Modifier = Modifier, spacing: Dp = Space.s,
 
 /** A section's title, in a card or over a group of rows (a month, a folder, a day): one style everywhere, read out as a heading. */
 @Composable
-fun SectionTitle(text: String, modifier: Modifier = Modifier, textAlign: TextAlign? = null) {
-    Text(text, modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, textAlign = textAlign)
+fun SectionTitle(text: String, modifier: Modifier = Modifier, textAlign: TextAlign? = null, role: String? = null) {
+    MorphText(androidx.compose.ui.text.AnnotatedString(text), role, modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, textAlign = textAlign)
 }
 
 /** A card's fill as the look has it: solid, see-through or transparent. [Section] and the tiles share it. */

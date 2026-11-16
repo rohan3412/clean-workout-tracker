@@ -710,7 +710,8 @@ fun BodyFigure(
     Box {
         // A double tap would delay every single tap, so it is listened for only while there is something to undo.
         // Only the live figure glides between pages; a small copy sits inside a card, which opens into its page as a whole.
-        Canvas(Modifier.semantics { contentDescription = description; role = Role.Image }.fillMaxWidth().aspectRatio(2 * VIEW_WIDTH / VIEW_HEIGHT).pointerInput(zoomed, interactive) {
+        // The same figure on a card and on the page that card opens: it moves and grows between the two, as one thing.
+        Canvas(Modifier.morphs("figure", same = true).semantics { contentDescription = description; role = Role.Image }.fillMaxWidth().aspectRatio(2 * VIEW_WIDTH / VIEW_HEIGHT).pointerInput(zoomed, interactive) {
             if (!interactive) return@pointerInput
             detectTapGestures(onDoubleTap = if (zoomed) { _ -> unzoom() } else null) { tapped ->
                 // Back through the zoom to the figure as drawn at normal size.
@@ -923,7 +924,7 @@ fun MeasurementDetailScreen(model: AppModel, fileName: String) {
                     val range = model.measurementRange()
                     val shown = if (range == 0L) points else points.filter { it.first >= LocalDate.now().minusDays(range) }
                     if (shown.size < 2) Text("Not enough entries in this period.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    else LineChart(shown, unit, goal = if (isWeight) weightGoal?.let { if (unit == "lb") it.targetKg / KG_PER_LB else it.targetKg } else null)
+                    else Box(Modifier.morphs("chart:weight")) { LineChart(shown, unit, goal = if (isWeight) weightGoal?.let { if (unit == "lb") it.targetKg / KG_PER_LB else it.targetKg } else null) }
                 }
                 else if (isWeight) EmptyPreview(
                     "Log ${2 - points.size} more ${if (points.isEmpty()) "weigh-ins" else "weigh-in"} to see your trend.", "Log weight", { model.logWeight() },

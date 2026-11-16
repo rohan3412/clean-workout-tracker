@@ -1,6 +1,16 @@
 package clean.app
 
 import androidx.compose.ui.platform.testTag
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.core.createChildTransition
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalWindowInfo
 import clean.app.ui.theme.orange
 import clean.app.ui.theme.numbers
 import androidx.compose.material3.LocalTextStyle
@@ -265,6 +275,7 @@ fun nowMillis(): Long {
     return now
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class, androidx.compose.animation.core.ExperimentalTransitionApi::class)
 @Composable
 fun App(model: AppModel = viewModel()) {
     BackHandler(enabled = model.stack.isNotEmpty()) { model.back() }
@@ -294,25 +305,80 @@ fun App(model: AppModel = viewModel()) {
     model.whatsNew?.let { WhatsNewPopup(it) { model.closeWhatsNew() } }
     // Every chart can ask for the full screen through this.
     CompositionLocalProvider(LocalFullChart provides { chart -> model.fullChart = chart; model.open(Screen.Chart) }) {
+    val motion = LocalMotion.current
+    val cards = remember { CardBounds() }
+    val clip = remember { MorphClip() }
+    val morphTexts = remember { androidx.compose.runtime.mutableStateMapOf<String, MorphTextSpec>() }
+    val window = LocalWindowInfo.current.containerSize
+    // A page keeps where it was scrolled to (and what else it remembers) while it is under others, so Back returns
+    // to the same spot; what it kept is dropped once it has left the stack.
+    val pages = rememberSaveableStateHolder()
+    val kept = remember { HashSet<String>() }
+    val open = model.stack.map { it.toString() }
+    LaunchedEffect(open) { kept.filter { it !in open }.forEach { pages.removeState(it); kept.remove(it) } }
+    // The tabs page stays composed under the pages, so on Back the card it grows from is already where it is.
+    val onTabs = model.stack.isEmpty()
+    // The tabs page is not built again on Back, so what its cards work out from the time now (fatigue) is asked for again here.
+    LaunchedEffect(onTabs) { if (onTabs) model.refreshMuscles() }
+    val lastBottom = remember { arrayOfNulls<Screen>(1) }
+    SideEffect { model.stack.firstOrNull()?.let { lastBottom[0] = it } }
+    // The card the change under way (a page opening or closing) grows out of or shrinks into, decided once per change: none unless the
+    // page was opened by a card's own tap, the card is still on the screen and in the tab shown; then it is the blink.
+    val card: String? = remember(onTabs) {
+        val key = model.cardKeyOf(if (onTabs) lastBottom[0] else model.stack.firstOrNull())
+        val spot = key?.let { cards.onScreen(it, window.width.toFloat(), window.height.toFloat()) }
+        if (!motion || key == null || spot == null || tabOfCard(key) != model.tab) null
+        else { clip.begin(spot, Size(window.width.toFloat(), window.height.toFloat())); key }
+    }
+    // The card change is under way until its clock has run (and a little over); pages and cards take part in it only until then.
+    val change = remember(onTabs) { Any() }
+    var settled by remember { mutableStateOf<Any?>(null) }
+    LaunchedEffect(change) { if (card != null) { delay(Motion.CARD_TO_PAGE + 80L); settled = change } }
+    val morphing = card != null && settled !== change
+    val morphingNow = rememberUpdatedState(morphing).let { state -> { state.value } }
+    SharedTransitionLayout(Modifier.fillMaxSize()) {
+    val shared = this
+    val tabsMove = updateTransition(onTabs, "tabs")
+    val tabsVisible = tabsMove.createChildTransition { if (it) EnterExitState.Visible else EnterExitState.PostExit }
+    val tabsScope = remember(tabsVisible) { TabsScope(tabsVisible) }
+    // The tabs page: a blink with the pages, or, under a growing card, solid until the container has covered it (and from the first frame of Back).
+    val tabsAlpha by tabsMove.animateFloat({
+        if (!motion) snap() else if (card != null) Motion.tabsHold(!targetState) else if (targetState) Motion.blinkInSpec() else Motion.blinkOutSpec()
+    }, "tabs alpha") { if (it) 1f else 0f }
+    val barOut = tabsMove.animateFloat({ if (!motion || card == null) snap() else Motion.cardBounds(!targetState) }, "bar") { if (it) 0f else 1f }
+    CompositionLocalProvider(
+        LocalSharedScope provides shared, LocalMorphClip provides clip, LocalMorphCard provides card, LocalCardBounds provides cards, LocalMorphTexts provides morphTexts, LocalBarOut provides barOut,
+        LocalPageForward provides { model.stack.isNotEmpty() }, LocalMorphing provides morphingNow, LocalCardPress provides { key, tap -> model.fromCard(key, tap) },
+    ) {
     Box(Modifier.fillMaxSize()) {
-        // Every page change, forward or Back, is the blink: the page left fades out, then the new one fades in, in place (Motion).
-        val motion = LocalMotion.current
-        // A page keeps where it was scrolled to (and what else it remembers) while it is under others, so Back returns
-        // to the same spot; what it kept is dropped once it has left the stack.
-        val pages = rememberSaveableStateHolder()
-        val kept = remember { HashSet<String>() }
-        val open = model.stack.map { it.toString() }
-        LaunchedEffect(open) { kept.filter { it !in open }.forEach { pages.removeState(it); kept.remove(it) } }
+        // Every page change but a card opening its page, forward or Back, is the blink: the page left fades out, then the new one fades in, in place (Motion).
+        CompositionLocalProvider(LocalPageScope provides tabsScope, LocalPageCard provides null) {
+            Box(Modifier.fillMaxSize().graphicsLayer { alpha = tabsAlpha }.then(if (onTabs) Modifier else Modifier.clearAndSetSemantics { }).testTag("page:tabs")) {
+                pages.SaveableStateProvider("tabs") { Box(Modifier.fillMaxSize()) { GrainLayer(); Tabs(model) } }
+            }
+        }
+        // While a page is open the tabs under it take no touch.
+        Box(Modifier.fillMaxSize().then(if (onTabs) Modifier else Modifier.pointerInput(Unit) { })) {
         AnimatedContent(
             model.stack.lastOrNull(),
-            transitionSpec = { Motion.blinkIn(motion) togetherWith Motion.blinkOut(motion) },
+            transitionSpec = {
+                val toCard = card != null && ((initialState == null) != (targetState == null))
+                when {
+                    !motion -> EnterTransition.None togetherWith ExitTransition.None
+                    // The container grows out of the card (or back into it) and the tabs page stays under it until it is done.
+                    toCard -> EnterTransition.None togetherWith ExitTransition.KeepUntilTransitionsFinished
+                    else -> Motion.blinkIn(motion) togetherWith Motion.blinkOut(motion)
+                }
+            },
             label = "page",
         ) { screen ->
-        pages.SaveableStateProvider(screen?.toString()?.also { kept.add(it) } ?: "tabs") {
-        Box(Modifier.fillMaxSize().testTag("page:" + (screen?.let { it::class.simpleName } ?: "tabs"))) {
+        val pageCard = if (card != null && screen != null && screen == (if (onTabs) lastBottom[0] else model.stack.firstOrNull())) card else null
+        CompositionLocalProvider(LocalPageScope provides this, LocalPageCard provides pageCard) {
+        pages.SaveableStateProvider(screen?.toString()?.also { kept.add(it) } ?: "none") {
+        Box(Modifier.fillMaxSize().then(if (screen == null) Modifier else Modifier.testTag("page:" + screen::class.simpleName)).cardTarget(pageCard, morphing)) {
         // Linen draws a white sheet under the pages that have a bar; the tabs, the full-screen chart and photos, and the arrange pages do not.
         val page: @Composable () -> Unit = { when (screen) {
-            null -> Box(Modifier.fillMaxSize()) { GrainLayer(); Tabs(model) }
+            null -> Unit
             Screen.Active -> ActiveScreen(model)
             Screen.Correct -> CorrectScreen(model)
             Screen.Settings -> SettingsScreen(model)
@@ -349,10 +415,14 @@ fun App(model: AppModel = viewModel()) {
             is Screen.Photo -> PhotoScreen(model, screen.name, screen.pose)
             is Screen.PhotoCompare -> PhotoCompareScreen(model, screen.pose)
         } }
-        if (screen == null || screen == Screen.Chart || screen == Screen.EditHome || screen == Screen.EditProfile || screen is Screen.Photo || screen is Screen.PhotoCompare) page() else SheetHost(page)
+        if (screen == null) Unit else if (screen == Screen.Chart || screen == Screen.EditHome || screen == Screen.EditProfile || screen is Screen.Photo || screen is Screen.PhotoCompare) page() else SheetHost(page)
         }
         }
         }
+        }
+        }
+        // The container's outline, above everything, in the same coordinates the container is drawn in.
+        if (card != null) CardEdge()
         // On the pages behind the tabs the bar sits at the bottom of the screen; on the tabs it is above the buttons.
         val bannerScope by model.bannerScope.collectAsState()
         val top = model.stack.lastOrNull()
@@ -364,6 +434,8 @@ fun App(model: AppModel = viewModel()) {
         UndoBar(model, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = if (top == Screen.Active) 56.dp else 0.dp))
         TemplateOfferDialog(model)
         ClashSheet(model)
+    }
+    }
     }
     }
 }
@@ -494,8 +566,9 @@ private fun Tabs(model: AppModel) {
                     }
                 }
             }
-            // The bar belongs to the tabs page: it goes and comes back in the same blink as the page.
-            TabBar(model, order, ends[order[pager.currentPage.coerceIn(order.indices)]] == true, banner, nav, Modifier.align(Alignment.BottomCenter))
+            // The bar belongs to the tabs page: it goes and comes back in the same blink as the page, or under a growing card slides away with it.
+            val barOut = LocalBarOut.current
+            TabBar(model, order, ends[order[pager.currentPage.coerceIn(order.indices)]] == true, banner, nav, Modifier.align(Alignment.BottomCenter).graphicsLayer { translationY = (barOut?.value ?: 0f) * (size.height + 48.dp.toPx()) })
         }
     }
 }

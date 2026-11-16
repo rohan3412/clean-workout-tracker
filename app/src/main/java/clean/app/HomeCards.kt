@@ -256,7 +256,7 @@ internal fun NextWorkoutCard(model: AppModel) {
     val reason = if (fromProgram != null && pick != null) pickReason(pick) else rotation?.reason?.replaceFirstChar { it.uppercase() }.orEmpty()
     Section("", onClick = { model.open(Screen.TemplateStats(template.id)) }) {
         Caption("Next workout")
-        Text(template.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        MorphText(androidx.compose.ui.text.AnnotatedString(template.name), "title", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text(listOf(reason, plural(template.blocks.size, "exercise")).filter { it.isNotEmpty() }.joinToString(" · "), color = MaterialTheme.colorScheme.onSurfaceVariant)
         QuietButton("Start", { model.start(template) }, Modifier.fillMaxWidth())
     }

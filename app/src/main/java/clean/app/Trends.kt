@@ -49,7 +49,7 @@ fun TrendsScreen(model: AppModel) {
                 Triple("Working sets a week", "sets", shown.map { it.monday to it.sets.toDouble() }),
             )
             for ((title, unit, points) in charts) item(key = title) {
-                Section(title) {
+                Section(title, Modifier.morphs("chart:$title")) {
                     if (weeks.size < 3) EmptyPreview("Log ${3 - weeks.size} more ${if (weeks.size == 2) "week" else "weeks"} of workouts to see this.") { PreviewSamples.Line() }
                     else if (points.size < 3) Text("Not enough weeks in this period to draw a line.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     else {

@@ -81,11 +81,13 @@ private val SHORT_DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM")
 
 /** A page in miniature: its name, a little of what is on it, and the whole card opens it (nothing inside takes a tap of its own). */
 @Composable
-private fun MiniPage(title: String, value: String, modifier: Modifier, onClick: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
-    Card(modifier.clip(cardShape()).pressable(onClick = onClick), shape = cardShape(), colors = CardDefaults.cardColors(containerColor = cardFill()), border = cardBorder()) {
-        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+private fun MiniPage(title: String, value: String, modifier: Modifier, key: String, onClick: () -> Unit, content: @Composable ColumnScope.() -> Unit) = CompositionLocalProvider(LocalCardKey provides key) {
+    val edge = cardBorder()
+    val fill = cardFill()
+    Card(modifier.clip(cardShape()).pressable(onClick = cardTap(onClick)), shape = cardShape(), colors = CardDefaults.cardColors(containerColor = fill), border = edge) {
+        Column(Modifier.opensInto(edge, fill).padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-                SectionTitle(title)
+                SectionTitle(title, role = "title")
                 if (value.isNotEmpty()) Text(value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             content()
@@ -171,14 +173,14 @@ fun ProgressTab(model: AppModel) {
         item {
             // The two stand as tall as each other; the figure sets the height and the rows take what room there is.
             Twins(Modifier.fillMaxWidth().padding(horizontal = Space.m), 8.dp) {
-                MiniPage("History", workouts.size.toString(), Modifier, { model.open(Screen.History) }) {
+                MiniPage("History", workouts.size.toString(), Modifier, "progress:history", { model.open(Screen.History) }) {
                     if (workouts.isEmpty()) Text("No workouts yet", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     else HistoryRows(model)
                 }
-                MiniPage("Body", "", Modifier, { model.open(Screen.Body) }) { BodyMini(model) }
+                MiniPage("Body", "", Modifier, "progress:body", { model.open(Screen.Body) }) { BodyMini(model) }
             }
         }
-        item { ActivityCard(model) }
+        item { CompositionLocalProvider(LocalCardKey provides "progress:activity") { ActivityCard(model) } }
         item { StatisticsCard(model) }
         item { BarSpace() }
     }

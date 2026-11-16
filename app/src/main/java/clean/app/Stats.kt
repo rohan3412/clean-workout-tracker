@@ -165,7 +165,7 @@ internal fun tileModifier(): Modifier = if (LocalHalfCard.current) Modifier.fill
 @Composable
 internal fun WorkoutsTile(model: AppModel) {
     val workouts by model.workouts.collectAsState()
-    Tile("Workouts", workouts.size.toString(), tileModifier()) { model.open(Screen.Trends) }
+    Tile("Workouts", workouts.size.toString(), tileModifier(), link = "chart:Workouts a week") { model.open(Screen.Trends) }
 }
 
 /** The workouts of this month; it opens the history. */
@@ -181,7 +181,7 @@ internal fun MonthTile(model: AppModel) {
 internal fun StreakTile(model: AppModel) {
     val consistency by model.consistency.collectAsState()
     Tile(
-        "Week streak", (consistency?.streak?.length ?: 0).toString(), tileModifier(), icon = CleanIcons.Shield.takeIf { consistency?.streak?.shield == true },
+        "Week streak", (consistency?.streak?.length ?: 0).toString(), tileModifier(), icon = CleanIcons.Shield.takeIf { consistency?.streak?.shield == true }, valueRole = "number", 
     ) { model.open(Screen.Trophies) }
 }
 
@@ -206,7 +206,7 @@ internal fun WeightTile(model: AppModel) {
             moved == "0" -> "no change"
             else -> "${if (change!! > 0) "+" else ""}$moved $unit in 30 days"
         },
-        spark = weightLine(weights),
+        spark = weightLine(weights), link = "chart:weight",
         onAdd = { logging = true }, addLabel = "Log body weight",
     ) { if (current == null) model.logWeight() else model.open(Screen.MeasurementDetail("weight.csv")) }
 }
@@ -217,7 +217,7 @@ internal fun VolumeTile(model: AppModel) {
     val weeks = recentWeeks(model)
     val thisMonday = weekStart(LocalDate.now())
     val now = weeks.lastOrNull { it.monday == thisMonday }?.volume ?: 0.0
-    Tile("Volume", model.volume(now), tileModifier(), second = if (weeks.size < 2) "Log ${2 - weeks.size} more ${if (weeks.isEmpty()) "weeks" else "week"} of workouts" else "This week", spark = weeks.finished().map { it.volume }, sample = true) { model.open(Screen.Trends) }
+    Tile("Volume", model.volume(now), tileModifier(), second = if (weeks.size < 2) "Log ${2 - weeks.size} more ${if (weeks.isEmpty()) "weeks" else "week"} of workouts" else "This week", spark = weeks.finished().map { it.volume }, sample = true, link = "chart:Volume a week") { model.open(Screen.Trends) }
 }
 
 /**
@@ -244,7 +244,7 @@ internal fun OneRmTile(model: AppModel, rank: Int) {
     }
     val (name, estimates) = pick
     val unit = model.unitOf(name)
-    Tile("1RM", showEstimate(estimates.last(), unit), tileModifier(), second = "$name · $unit", spark = estimates.takeLast(24)) { model.open(Screen.ExerciseDetail(name, tab = 2)) }
+    Tile("1RM", showEstimate(estimates.last(), unit), tileModifier(), second = "$name · $unit", spark = estimates.takeLast(24), link = "chart:1rm", valueRole = "number") { model.open(Screen.ExerciseDetail(name, tab = 2)) }
 }
 
 /** The weigh-ins of the last [WEEKS] weeks as one mean a week, oldest first: a weigh-in a day would make the small line a scribble. */
@@ -307,7 +307,7 @@ internal fun ThisWeekCard(model: AppModel, half: Boolean = false) {
                 WeekDays(model, monday, week)
             }
         }
-        if (!half) ProgramCard(model)
+        if (!half) CompositionLocalProvider(LocalCardKey provides LocalCardKey.current?.let { "$it:program" }) { ProgramCard(model) }
     }
 }
 
@@ -370,7 +370,7 @@ internal fun ActivityCard(model: AppModel) {
             },
             verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.s),
         ) {
-            SectionTitle("Activity")
+            SectionTitle("Activity", role = "title")
             if (first != null) Text("since ${first.format(SINCE)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Choice(listOf(false, true), byVolume, { if (it) "Volume" else "Time" }) { byVolume = it }
@@ -408,7 +408,7 @@ internal fun BodyWeightCard(model: AppModel) {
     val inUnit = shown.map { it.first to (if (unit == "lb") it.second / clean.core.KG_PER_LB else it.second) }
     val line = inUnit.groupBy { weekStart(it.first) }.toSortedMap().values.map { w -> w.sumOf { it.second } / w.size }
     val edge = LocalEdgeCharts.current && line.size >= 2
-    val bleed: (@Composable ColumnScope.() -> Unit)? = if (edge) ({ Sparkline(line, edge = true, height = 96.dp) }) else null
+    val bleed: (@Composable ColumnScope.() -> Unit)? = if (edge) ({ Sparkline(line, Modifier.morphsFromCard("chart:weight"), edge = true, height = 96.dp) }) else null
     Section("Body weight", onClick = { model.open(Screen.MeasurementDetail("weight.csv")) }, bleed = bleed) {
         when {
             weights.size < 2 -> EmptyPreview(
@@ -426,7 +426,7 @@ internal fun BodyWeightCard(model: AppModel) {
                     )
                 }
             }
-            else -> LineChart(inUnit, unit)
+            else -> Box(Modifier.morphsFromCard("chart:weight")) { LineChart(inUnit, unit) }
         }
     }
 }
@@ -469,21 +469,24 @@ private fun ProgramCard(model: AppModel) {
 @Composable
 internal fun Tile(
     label: String, value: String, modifier: Modifier = Modifier, second: String? = null, icon: ImageVector? = null,
-    spark: List<Double>? = null, onAdd: (() -> Unit)? = null, addLabel: String = "", sample: Boolean = false, onClick: (() -> Unit)? = null,
+    spark: List<Double>? = null, onAdd: (() -> Unit)? = null, addLabel: String = "", sample: Boolean = false, link: String? = null, valueRole: String? = null, onClick: (() -> Unit)? = null,
 ) {
     val edge = LocalEdgeCharts.current && spark != null && spark.size >= 2
+    val outline = tileBorder()
+    val tileColour = tileFill()
+    val tap = if (onClick != null) cardTap(onClick) else null
     CompositionLocalProvider(LocalOnTile provides true) {
-    Card(if (onClick != null) modifier.clip(cardShape()).pressable(onClick = onClick) else modifier, shape = cardShape(), colors = CardDefaults.cardColors(containerColor = tileFill()), border = tileBorder()) {
-        Column(Modifier.fillMaxHeight()) {
+    Card(if (tap != null) modifier.clip(cardShape()).pressable(onClick = tap) else modifier, shape = cardShape(), colors = CardDefaults.cardColors(containerColor = tileColour), border = outline) {
+        Column((if (tap != null) Modifier.opensInto(outline, tileColour) else Modifier).fillMaxHeight()) {
             Row(Modifier.padding(start = Space.l, top = Space.l, end = Space.l, bottom = if (edge) Space.s else Space.l), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Space.xxs)) {
-                    Caption(label)
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        FitValue(value, MaterialTheme.typography.headlineMedium.numbers())
+                    Caption(label, role = "title")
+                    Row(Modifier.then(if (spark != null && spark.size >= 2 || link == null) Modifier else Modifier.morphsFromCard(link)), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                        FitValue(value, MaterialTheme.typography.headlineMedium.numbers(), if (tap != null) valueRole else null)
                         if (icon != null) Icon(icon, "Shield held", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                     }
                     if (second != null) Text(second, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (spark != null && spark.size >= 2 && !edge) Sparkline(spark, Modifier.padding(top = Space.s))
+                    if (spark != null && spark.size >= 2 && !edge) Sparkline(spark, Modifier.padding(top = Space.s).then(if (link != null) Modifier.morphsFromCard(link) else Modifier))
                     // Too little to draw yet: a faint sample line says what will appear (see EmptyPreview).
                     else if (sample && (spark == null || spark.size < 2)) {
                         Box(Modifier.graphicsLayer { alpha = 0.3f }.clearAndSetSemantics { }) { Sparkline(PreviewSamples.LINE.map { it.toDouble() }, Modifier.padding(top = Space.s)) }
@@ -500,7 +503,7 @@ internal fun Tile(
             // Edge to edge: the line runs along the card's bottom, left to right, with the card's corners clipping it; in a taller card it sits at the bottom.
             if (edge && spark != null) {
                 Spacer(Modifier.weight(1f))
-                Sparkline(spark, edge = true)
+                Sparkline(spark, if (link != null) Modifier.morphsFromCard(link) else Modifier, edge = true)
             }
         }
     }
@@ -512,17 +515,20 @@ internal fun Tile(
  * pounds), it steps down in size, to no less than 70 %, instead of wrapping onto a second line. Nothing is drawn until it fits.
  */
 @Composable
-private fun FitValue(text: String, style: androidx.compose.ui.text.TextStyle) {
+private fun FitValue(text: String, style: androidx.compose.ui.text.TextStyle, role: String? = null) {
     var scale by remember(text, style) { mutableStateOf(1f) }
     var fits by remember(text, style) { mutableStateOf(false) }
     val light = LocalLook.current.lightNumbers
     // Linen: a light 34 sp figure with its unit small and muted beside it.
     val shown = if (light) style.copy(fontSize = style.fontSize * (34f / 28f), fontWeight = FontWeight.Light) else style
-    Text(
-        if (light) withUnit(text, MaterialTheme.colorScheme.onSurfaceVariant) else androidx.compose.ui.text.AnnotatedString(text),
-        Modifier.drawWithContent { if (fits) drawContent() }, style = shown.copy(fontSize = shown.fontSize * scale), fontWeight = if (light) FontWeight.Light else FontWeight.SemiBold,
-        maxLines = 1, softWrap = false,
-        onTextLayout = { if (it.hasVisualOverflow && scale > 0.7f) scale -= 0.05f else fits = true },
+    val words = if (light) withUnit(text, MaterialTheme.colorScheme.onSurfaceVariant) else androidx.compose.ui.text.AnnotatedString(text)
+    val onLayout: (androidx.compose.ui.text.TextLayoutResult) -> Unit = { if (it.hasVisualOverflow && scale > 0.7f) scale -= 0.05f else fits = true }
+    if (role != null) MorphText(
+        words, role, Modifier.drawWithContent { if (fits) drawContent() }, style = shown.copy(fontSize = shown.fontSize * scale), fontWeight = if (light) FontWeight.Light else FontWeight.SemiBold,
+        maxLines = 1, softWrap = false, onTextLayout = onLayout,
+    ) else Text(
+        words, Modifier.drawWithContent { if (fits) drawContent() }, style = shown.copy(fontSize = shown.fontSize * scale), fontWeight = if (light) FontWeight.Light else FontWeight.SemiBold,
+        maxLines = 1, softWrap = false, onTextLayout = onLayout,
     )
 }
 
@@ -1239,7 +1245,7 @@ fun BigNumber(value: String, unit: String, modifier: Modifier = Modifier) {
     val look = LocalLook.current
     if (!look.lightNumbers) return
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    Text(
+    MorphText(
         androidx.compose.ui.text.buildAnnotatedString {
             append(value)
             if (unit.isNotEmpty()) {
@@ -1248,7 +1254,7 @@ fun BigNumber(value: String, unit: String, modifier: Modifier = Modifier) {
                 pop()
             }
         },
-        modifier.semantics { contentDescription = "Latest $value $unit".trim() },
+        "number", modifier.semantics { contentDescription = "Latest $value $unit".trim() }, onPage = true,
         style = MaterialTheme.typography.displayLarge.numbers().copy(fontSize = (64f * LocalTextScale.current).sp, fontWeight = FontWeight.Light),
         maxLines = 1,
     )

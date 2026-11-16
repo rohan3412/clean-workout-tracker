@@ -72,9 +72,9 @@ fun TrophiesScreen(model: AppModel) {
             val lead = program?.streak ?: streak
             item {
                 Section("Streak") {
-                    Text(
-                        if (program != null) spanText(lead.length) else plural(lead.length, "week") + if (lead.length >= 4) " · about ${plural(approxMonths(lead.length), "month")}" else "",
-                        style = MaterialTheme.typography.headlineMedium.numbers(), fontWeight = FontWeight.SemiBold,
+                    MorphText(
+                        androidx.compose.ui.text.AnnotatedString(if (program != null) spanText(lead.length) else plural(lead.length, "week") + if (lead.length >= 4) " · about ${plural(approxMonths(lead.length), "month")}" else ""),
+                        "number", onPage = true, style = MaterialTheme.typography.headlineMedium.numbers(), fontWeight = FontWeight.SemiBold,
                     )
                     if (program != null) Text("on program · ${plural(lead.length, "week")}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {

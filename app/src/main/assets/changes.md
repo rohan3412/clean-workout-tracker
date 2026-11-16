@@ -3,6 +3,9 @@
 One section per version, newest first, as `## <versionName> (<date>)`, then one `- Title: sentence` line per change. The app
 shows the section of the version it is once after an update (one swipe per change) and every section under Settings, Credits.
 
+## 1.0.3
+- Cards open into their pages: A tapped card grows into its page, and what is on both, like the body figure, moves to its new place. Back shrinks the page into the card again.
+
 ## 1.0.2
 - Source code: Clean's code is a tap away under Settings, Credits.
 - What's new: After each update this card shows what changed. Earlier versions are under Settings, Credits.

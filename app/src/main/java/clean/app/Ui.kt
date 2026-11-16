@@ -228,7 +228,14 @@ fun Badge(text: String, modifier: Modifier = Modifier, color: Color = LocalClean
 
 /** The small spaced capitals over a column or a group; always muted, so the numbers under it lead. */
 @Composable
-fun Caption(text: String, modifier: Modifier = Modifier, align: TextAlign? = null) {
+fun Caption(text: String, modifier: Modifier = Modifier, align: TextAlign? = null, role: String? = null) {
+    if (role != null) {
+        MorphText(
+            androidx.compose.ui.text.AnnotatedString(text.uppercase()), role, modifier, textAlign = align, maxLines = 1,
+            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp), color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
     Text(
         text.uppercase(), modifier, textAlign = align, maxLines = 1,
         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp), color = MaterialTheme.colorScheme.onSurfaceVariant,
