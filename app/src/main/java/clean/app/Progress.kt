@@ -152,6 +152,9 @@ private fun ColumnScope.HistoryRows(model: AppModel) {
             val count = remember(w, prs) { recordCount(w, prs[w.date].orEmpty()) }
             // Each row is one thing that travels as the card opens (its own page's matching card, or below the bottom of the page), with its
             // name, PR count and date moving separately onto their places on that card (Modifier.morphs, MorphText, role "row:...").
+            // A row the list cuts off at the card's bottom stays where it is and fades with the card: travelling, it would show the part the list hides.
+            val whole = { state.layoutInfo.visibleItemsInfo.firstOrNull { it.key == w.date }?.let { it.offset >= 0 && it.offset + it.size <= state.layoutInfo.viewportEndOffset } ?: false }
+            CompositionLocalProvider(LocalMorphEnabled provides whole) {
             Row(Modifier.morphs("row:out", w.date, late = true), horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
                 MorphText(androidx.compose.ui.text.AnnotatedString(w.name), "row:name", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, id = w.date)
                 if (count > 0) Row(Modifier.morphs("row:prs", w.date).semantics(mergeDescendants = true) { contentDescription = "${shortNumber(count)} PRs" }, verticalAlignment = Alignment.CenterVertically) {
@@ -159,6 +162,7 @@ private fun ColumnScope.HistoryRows(model: AppModel) {
                     Text(shortNumber(count), maxLines = 1, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
                 }
                 MorphText(androidx.compose.ui.text.AnnotatedString(LocalDate.parse(w.day).format(SHORT_DAY)), "row:date", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, id = w.date)
+            }
             }
         }
     }

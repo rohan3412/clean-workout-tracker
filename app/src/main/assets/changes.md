@@ -17,6 +17,9 @@ shows the section of the version it is once after an update (one swipe per chang
 - Weight ruler: Flick it and it coasts, then snaps to the nearest step with a light tick on each whole number.
 - Calendar: The full calendar ends at today, and fills in a wave the first time you open it.
 - Performance mode: Settings, Appearance turns every animation off.
+- Smoother moves: Names and numbers keep their shape while they travel and change only mid-way, so nothing jumps at the start or end.
+- History cards: A workout's date, totals, PRs and exercises travel into its page, and the Best set column is gone.
+- Body figure: Swiping brings the new colours in from the side of the card.
 
 ## 1.0.3
 - Cards open into their pages: A tapped card grows into its page, and what is on both, like the body figure, moves to its new place. Back shrinks the page into the card again.

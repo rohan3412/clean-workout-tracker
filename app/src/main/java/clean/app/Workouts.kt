@@ -42,6 +42,7 @@ import clean.core.roundLabels
 import clean.core.shortNumber
 import clean.core.sidesOf
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
 import androidx.compose.material3.OutlinedTextField
@@ -220,27 +221,6 @@ private class Searchable(val workout: Workout) {
     }
 }
 
-/** `30 kg × 10 [F]`, or `+20 kg × 15` for a lift done with bodyweight plus load. */
-private fun AnnotatedString.Builder.appendSet(model: AppModel, set: SetItem, color: Color) {
-    val unit = model.unitOf(set.row.exerciseName)
-    val w = set.weight
-    val r = set.reps
-    if (w != null && r != null) {
-        if (model.loadTypeOf(set.row.exerciseName) == LoadType.BODYWEIGHT) append("+")
-        append("${showWeight(w, unit)} $unit × $r")
-    } else {
-        append(setValues(set, unit))
-    }
-    if (set.type != SetType.NORMAL) withStyle(SpanStyle(color = color, fontWeight = FontWeight.Bold)) { append(" [${set.type.letter}]") }
-}
-
-@Composable
-private fun bestSetText(model: AppModel, set: SetItem?): AnnotatedString {
-    if (set == null) return AnnotatedString("")
-    val color = typeColor(set.type)
-    return buildAnnotatedString { appendSet(model, set, color) }
-}
-
 /** `1 PR`, `1.5 PRs`: a left and right workout's count can end in a half. */
 fun prsText(count: Double) = "${shortNumber(count)} ${if (count == 1.0) "PR" else "PRs"}"
 
@@ -295,10 +275,20 @@ fun WorkoutCard(workout: Workout, model: AppModel, volume: Double, records: Doub
     // On the History page the card is also a page card (its own key): while the change to its workout's page runs, its name is the card's
     // title; at all other times it stays what the History card's rows travel to, ready for Back to that card.
     val pageCard = LocalCardKey.current?.takeIf { isPageKey(it) }
-    val rowMode = fromRow && !(pageCard != null && LocalPageMorphing.current.invoke())
+    val rowsMoving = LocalMorphing.current
     // A row's side of the History card's change has no card key of its own, whatever card the page's card is.
     @Composable fun asRow(content: @Composable () -> Unit) {
-        if (rowMode && pageCard != null) androidx.compose.runtime.CompositionLocalProvider(LocalCardKey provides null) { content() } else content()
+        if (pageCard != null) androidx.compose.runtime.CompositionLocalProvider(LocalCardKey provides null) { content() } else content()
+    }
+    // What the card's rows travel to is also what the card travels to its page with: both are composed, laid out and registered all the time (a text that is
+    // new at the moment of the tap has no place to start from for a frame or two, and is missing), and one is drawn, the row's while the rows move.
+    @Composable fun RowOrCard(modifier: Modifier, row: @Composable () -> Unit, card: @Composable () -> Unit) {
+        if (!fromRow) { Box(modifier) { card() }; return }
+        if (pageCard == null) { Box(modifier) { row() }; return }
+        Box(modifier) {
+            Box(Modifier.graphicsLayer { alpha = if (rowsMoving()) 0f else 1f }) { card() }
+            Box(Modifier.matchParentSize().clearAndSetSemantics { }.graphicsLayer { alpha = if (rowsMoving()) 1f else 0f }) { asRow { row() } }
+        }
     }
     Section("", onClick = { model.open(Screen.WorkoutDetail(workout.date)) }, spacing = Space.s) {
         Column {
@@ -306,27 +296,39 @@ fun WorkoutCard(workout: Workout, model: AppModel, volume: Double, records: Doub
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 colors.ofName(workout.name)?.let { TemplateDot(it) }
                 // On the History page opened from Progress's History card, the name, the PR badge and the date are what that card's rows travel to.
-                asRow { MorphText(androidx.compose.ui.text.AnnotatedString(workout.name), if (rowMode) "row:name" else "title", Modifier.weight(1f), onPage = rowMode, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, id = if (rowMode) workout.date else null) }
-                if (records > 0) asRow { Badge(prsText(records), if (rowMode) Modifier.morphs("row:prs", workout.date) else Modifier) }
+                val title = androidx.compose.ui.text.AnnotatedString(workout.name)
+                RowOrCard(
+                    Modifier.weight(1f),
+                    row = { MorphText(title, "row:name", Modifier.fillMaxWidth(), onPage = true, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, id = workout.date) },
+                    card = { MorphText(title, "title", Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                )
+                // Going to its workout's page, the PR count travels to the page's PR figure.
+                if (records > 0) RowOrCard(Modifier, row = { Badge(prsText(records), Modifier.morphs("row:prs", workout.date)) }, card = { Badge(prsText(records), role = "prs") })
             }
             val day = parseDate(workout.date)?.format(SHORT) ?: workout.date
-            val rest = listOf(duration(workout.durationSeconds), model.volume(volume)).joinToString("  ·  ")
-            // The line is laid out whole, as one text, with its date part drawn by the moving text laid over it: the rest of the line
-            // stays where it is (and fades in with the page) however the date's box is sized on its way.
-            if (rowMode) asRow { Box {
-                Text(
-                    buildAnnotatedString { withStyle(SpanStyle(color = Color.Transparent)) { append(day) }; append("  ·  $rest") },
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // The date, the duration and the volume are each a text that travels (to the page's date line and its bar of totals): the date to its
+            // place on the History card when it comes from a row of Progress's History card, on to the workout's page otherwise.
+            val small = MaterialTheme.typography.bodySmall
+            val quiet = MaterialTheme.colorScheme.onSurfaceVariant
+            val dot = "  ·  "
+            Row {
+                val dayText = androidx.compose.ui.text.AnnotatedString(day)
+                RowOrCard(
+                    Modifier,
+                    row = { MorphText(dayText, "row:date", onPage = true, style = small, color = quiet, maxLines = 1, id = workout.date) },
+                    card = { MorphText(dayText, "date", style = small, color = quiet, maxLines = 1) },
                 )
-                MorphText(androidx.compose.ui.text.AnnotatedString(day), "row:date", onPage = true, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, id = workout.date)
-            } } else Text("$day  ·  $rest", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(dot, style = small, color = quiet, maxLines = 1, softWrap = false)
+                MorphText(androidx.compose.ui.text.AnnotatedString(duration(workout.durationSeconds)), "duration", style = small, color = quiet, maxLines = 1)
+                Text(dot, style = small, color = quiet, maxLines = 1, softWrap = false)
+                MorphText(androidx.compose.ui.text.AnnotatedString(model.volume(volume)), "volume", style = small, color = quiet, maxLines = 1)
+            }
             if (workout.notes.isNotEmpty()) Text(workout.notes, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (snippet != null) Text(snippet, style = MaterialTheme.typography.bodySmall, fontStyle = FontStyle.Italic, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Column {
             Row {
-                Caption("Sets", Modifier.weight(1.5f))
-                Caption("Best set", Modifier.weight(1f))
+                Caption("Sets", Modifier.weight(2.5f))
                 if (hasPaired) {
                     Caption("L 1RM", Modifier.width(SIDE_COLUMN), TextAlign.End)
                     Caption("R 1RM", Modifier.width(SIDE_COLUMN), TextAlign.End)
@@ -343,20 +345,29 @@ fun WorkoutCard(workout: Workout, model: AppModel, volume: Double, records: Doub
                     fun shown(kg: Double?) = if (kg == null) NONE else showWeight(kg, unit)
                     fun said(side: String, kg: Double?) = if (kg == null) "$side no estimate" else "$side ${showWeight(kg, unit)} ${if (unit == "lb") "pounds" else "kilograms"}"
                     Row(Modifier.semantics(mergeDescendants = true) { contentDescription = "${shortNumber(working)} × ${block.exercise}. Estimated 1RM: ${said("left", left)}, ${said("right", right)}" }) {
-                        Text("${shortNumber(working)} × ${block.exercise}", Modifier.weight(2.5f).padding(end = Space.s), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        ExerciseLine(working, block.exercise, at, Modifier.weight(2.5f).padding(end = Space.s))
                         for (kg in listOf(left, right)) Text(shown(kg), Modifier.width(SIDE_COLUMN), color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End, maxLines = 1, style = LocalTextStyle.current.numbers())
                     }
                 } else Row {
-                    Text("${shortNumber(working)} × ${block.exercise}", Modifier.weight(1.5f).padding(end = Space.s), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(bestSetText(model, block.bestSet), Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                    ExerciseLine(working, block.exercise, at, Modifier.weight(1f).padding(end = Space.s))
                     if (hasPaired) Spacer(Modifier.width(SIDE_COLUMN))
-                    if (hasPaired || hasOneRm) Text(
-                        estimates[at]?.let { showEstimate(it, model.unitOf(block.exercise)) } ?: if (hasPaired) "" else NONE, Modifier.width(SIDE_COLUMN),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End, maxLines = 1, style = LocalTextStyle.current.numbers(),
+                    // The best estimate is the figure the workout's page shows on that exercise's best set.
+                    if (hasPaired || hasOneRm) MorphText(
+                        androidx.compose.ui.text.AnnotatedString(estimates[at]?.let { showEstimate(it, model.unitOf(block.exercise)) } ?: if (hasPaired) "" else NONE), "est", Modifier.width(SIDE_COLUMN),
+                        style = LocalTextStyle.current.numbers(), color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End, maxLines = 1, id = at.toString(), alignment = Alignment.CenterEnd,
                     )
                 }
             }
         }
+    }
+}
+
+/** One exercise of the History card's Sets column: how many sets, then its name, which travels onto the exercise's heading on the workout's page. */
+@Composable
+private fun ExerciseLine(working: Double, exercise: String, at: Int, modifier: Modifier) {
+    Row(modifier) {
+        Text("${shortNumber(working)} × ", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false)
+        MorphText(androidx.compose.ui.text.AnnotatedString(exercise), "ex", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, id = at.toString())
     }
 }
 
@@ -525,13 +536,15 @@ fun PrBadges(kinds: Set<PrKind>, modifier: Modifier = Modifier, sides: Map<PrKin
 
 /** One figure of a workout in the bar along the bottom of its page: a picture for what it is, and the number. */
 @Composable
-private fun RowScope.Total(icon: ImageVector, what: String, value: String, onClick: (() -> Unit)?) {
+private fun RowScope.Total(icon: ImageVector, what: String, value: String, onClick: (() -> Unit)?, role: String) {
     Row(
         Modifier.weight(1f).then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).padding(vertical = Space.m),
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, what, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("  $value", fontWeight = FontWeight.SemiBold)
+        Text("  ")
+        // The card's duration, volume and PR count travel to these.
+        MorphText(androidx.compose.ui.text.AnnotatedString(value), role, onPage = true, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -563,12 +576,10 @@ internal fun WorkoutCardSets(model: AppModel, workout: Workout, card: List<Int>,
             val plus = if (loadType == LoadType.BODYWEIGHT) "+" else ""
             val bodyweight = bodyweights.at(workout.date)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    block.exercise,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f).clickable { model.open(Screen.ExerciseDetail(block.exercise, tab = 0)) },
+                // The History card's line for this exercise travels to this heading.
+                MorphText(
+                    androidx.compose.ui.text.AnnotatedString(block.exercise), "ex", Modifier.weight(1f).clickable { model.open(Screen.ExerciseDetail(block.exercise, tab = 0)) }, onPage = true,
+                    style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, id = blockIndex.toString(),
                 )
                 if (block.paired) {
                     // How far one side lagged, when the sides differ; each side's 1RM is in the two columns under its heads.
@@ -579,6 +590,9 @@ internal fun WorkoutCardSets(model: AppModel, workout: Workout, card: List<Int>,
                     Icon(CleanIcons.More, "Options for ${block.exercise}", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+            // The one figure that is also on the History card (its estimate of the exercise): the best set's.
+            val estimates = block.sets.map { set -> val w = set.weight; val r = set.reps; if (w != null && r != null && set.type != SetType.WARMUP) realLoad(loadType, w, bodyweight)?.let { load -> estimate1Rm(load, r, rule, set.rpe) } else null }
+            val bestEstimate = estimates.withIndex().filter { it.value != null }.maxByOrNull { it.value!! }?.index
             var setIndex = firstSet[blockIndex]
             // Numbered as the logging screen does, whatever the stored Set Order says: warm-ups and drop sets take no number.
             val setNames = setLabels(block.sets.map { it.type })
@@ -615,7 +629,11 @@ internal fun WorkoutCardSets(model: AppModel, workout: Workout, card: List<Int>,
                         Row {
                             Text(setNames.getOrElse(setIndex - 1 - firstSet[blockIndex]) { item.row.setOrder }, Modifier.width(36.dp), style = MaterialTheme.typography.bodyMedium, color = typeColor(item.type), fontWeight = FontWeight.Bold)
                             Text((if (w != null && r != null) plus else "") + setValues(item, unit), Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                            if (estimate != null) Text(showWeight(Math.round(estimate).toDouble(), unit), Modifier.clickable { model.open(Screen.ExerciseDetail(block.exercise, tab = 0)) }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (estimate != null) MorphText(
+                                androidx.compose.ui.text.AnnotatedString(showWeight(Math.round(estimate).toDouble(), unit)), if (setIndex - 1 - firstSet[blockIndex] == bestEstimate) "est" else null,
+                                Modifier.clickable { model.open(Screen.ExerciseDetail(block.exercise, tab = 0)) }, onPage = true,
+                                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, id = blockIndex.toString(), alignment = Alignment.CenterEnd,
+                            )
                         }
                         PrBadges(mine, Modifier.padding(start = 36.dp).clickable { model.open(Screen.ExerciseDetail(block.exercise, tab = 0)) })
                     }
@@ -676,9 +694,9 @@ fun WorkoutDetailScreen(model: AppModel, date: String) {
         LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(bottom = 76.dp + lift)) {
             item {
                 // The name is in the bar above; the day leads to its month.
-                Text(
-                    parseDate(workout.date)?.format(LONG) ?: workout.date,
-                    Modifier.fillMaxWidth().clickable { model.open(Screen.Month(workout.day.take(7))) }.padding(horizontal = Space.l, vertical = Space.s),
+                MorphText(
+                    androidx.compose.ui.text.AnnotatedString(parseDate(workout.date)?.format(LONG) ?: workout.date), "date",
+                    Modifier.fillMaxWidth().clickable { model.open(Screen.Month(workout.day.take(7))) }.padding(horizontal = Space.l, vertical = Space.s), onPage = true,
                     style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 var note by remember(workout.date, workout.notes) { mutableStateOf(workout.notes) }
@@ -703,9 +721,9 @@ fun WorkoutDetailScreen(model: AppModel, date: String) {
             color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = if (docked) 0.dp else 8.dp,
         ) {
             Row(Modifier.padding(vertical = Space.xs), horizontalArrangement = Arrangement.SpaceEvenly) {
-                Total(CleanIcons.Timer, "Duration", duration(workout.durationSeconds), null)
-                Total(CleanIcons.Dumbbell, "Volume", model.volume(volume)) { showVolume = true }
-                Total(CleanIcons.StarLine, "PRs", shortNumber(records), if (records > 0) ({ showPrs = true }) else null)
+                Total(CleanIcons.Timer, "Duration", duration(workout.durationSeconds), null, "duration")
+                Total(CleanIcons.Dumbbell, "Volume", model.volume(volume), { showVolume = true }, "volume")
+                Total(CleanIcons.StarLine, "PRs", shortNumber(records), if (records > 0) ({ showPrs = true }) else null, "prs")
             }
         }
         }

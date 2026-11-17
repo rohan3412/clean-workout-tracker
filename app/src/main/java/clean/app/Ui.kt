@@ -219,10 +219,11 @@ fun DangerButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifie
 
 /** A small rounded tag: a PR, a count. Green unless told otherwise. */
 @Composable
-fun Badge(text: String, modifier: Modifier = Modifier, color: Color = LocalCleanColors.current.done) {
-    Text(
-        text, color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium,
-        modifier = modifier.background(color.copy(alpha = 0.16f), SmallShape).padding(horizontal = Space.s, vertical = Space.xxs),
+fun Badge(text: String, modifier: Modifier = Modifier, color: Color = LocalCleanColors.current.done, role: String? = null) {
+    // With a [role] the words travel to the same thing on the page a card opens ([MorphText]); the badge's own tint stays and fades with the card.
+    MorphText(
+        androidx.compose.ui.text.AnnotatedString(text), role, modifier.background(color.copy(alpha = 0.16f), SmallShape).padding(horizontal = Space.s, vertical = Space.xxs),
+        color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium,
     )
 }
 

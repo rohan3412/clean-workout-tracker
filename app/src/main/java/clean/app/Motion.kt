@@ -101,9 +101,35 @@ object Motion {
     /** What is on both the card and the page but not alike (a title, a number, a chart) crosses over while it travels. */
     fun morphIn(): TweenSpec<Float> = tween(CARD_TO_PAGE / 2, delayMillis = CARD_TO_PAGE / 4, easing = Emphasized)
     fun morphOut(): TweenSpec<Float> = tween(CARD_TO_PAGE / 2, delayMillis = CARD_TO_PAGE / 4, easing = Emphasized)
+    /**
+     * Words that travel between a card and its page cross over in the middle of the way, by how far the container has grown (0 the card,
+     * 1 the page): the card's version is gone from [TEXT_OUT_FROM] to [TEXT_OUT_TO], the page's comes in from [TEXT_IN_FROM] to [TEXT_IN_TO],
+     * so whatever differs between the two (the ellipsis, the wording, the weight, the colour) is changed where it cannot be seen.
+     */
+    const val TEXT_OUT_FROM = 0.35f
+    const val TEXT_OUT_TO = 0.5f
+    const val TEXT_IN_FROM = 0.5f
+    const val TEXT_IN_TO = 0.65f
+    fun textOut(grown: Float): Float = 1f - ((grown - TEXT_OUT_FROM) / (TEXT_OUT_TO - TEXT_OUT_FROM)).coerceIn(0f, 1f)
+    fun textIn(grown: Float): Float = ((grown - TEXT_IN_FROM) / (TEXT_IN_TO - TEXT_IN_FROM)).coerceIn(0f, 1f)
     /** A row going below the page by itself fades only late in the way, 250 to 450 ms of the 500, so nothing is left when it ends (Back: 50 to 250 ms) */
     fun rowOut(): TweenSpec<Float> = tween(CARD_TO_PAGE * 2 / 5, delayMillis = CARD_TO_PAGE / 2, easing = LinearEasing)
     fun rowIn(): TweenSpec<Float> = tween(CARD_TO_PAGE * 2 / 5, delayMillis = CARD_TO_PAGE / 10, easing = LinearEasing)
+    /**
+     * The way of a History row's name, date and PR count between the row and its card, so no two of them ever cross: on opening the box first
+     * moves up or down to its line (the first [LEG_SPLIT] of the clock) and only then sideways and in size, on Back sideways first and then
+     * to the row's line. The name keeps its width until the PR count has moved off, so its box never runs into it.
+     */
+    const val LEG_SPLIT = 0.45f
+    fun legged(initial: androidx.compose.ui.geometry.Rect, target: androidx.compose.ui.geometry.Rect, forward: Boolean): androidx.compose.animation.core.FiniteAnimationSpec<androidx.compose.ui.geometry.Rect> {
+        val via = if (forward) androidx.compose.ui.geometry.Rect(initial.left, target.top, initial.left + initial.width, target.top + target.height)
+            else androidx.compose.ui.geometry.Rect(target.left, initial.top, target.left + target.width, initial.top + initial.height)
+        return androidx.compose.animation.core.keyframes {
+            durationMillis = CARD_TO_PAGE
+            via at (CARD_TO_PAGE * LEG_SPLIT).toInt() using Standard
+            target at CARD_TO_PAGE using Standard
+        }
+    }
     /** The tabs page stays under the growing container until it is done (opening), and is there from the first frame going back. */
     fun <T> tabsHold(forward: Boolean): TweenSpec<T> = if (forward) tween(1, delayMillis = CARD_TO_PAGE) else tween(1)
 

@@ -19,7 +19,6 @@ import clean.app.ui.theme.CleanColors
 import clean.app.ui.theme.LocalCleanColors
 import clean.app.ui.theme.SmallShape
 import androidx.compose.ui.graphics.drawscope.withTransform
-import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.vector.PathParser
@@ -90,6 +89,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.composed
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
@@ -266,7 +273,7 @@ internal fun BodyMini(model: AppModel) {
     // A swipe tells the figure which way it went, so the colours slide in from that side; a change from anywhere else does not.
     val slide = remember { ViewSlide() }
     Column(
-        Modifier.swipeSteps(
+        Modifier.slideRoom(slide, Space.m).swipeSteps(
             onPrevious = { MINI_VIEWS.getOrNull(at - 1)?.let { slide.dir = -1; mode = it } },
             onNext = { MINI_VIEWS.getOrNull(at + 1)?.let { slide.dir = 1; mode = it } },
         ),
@@ -325,7 +332,7 @@ internal fun MuscleCard(model: AppModel, limit: Int? = null, onAll: (() -> Unit)
     // A sideways swipe on the figure goes to the view before or after.
     // It tells the figure which way it went, so the colours slide in from that side (a tap on a chip does not).
     val slide = remember { ViewSlide() }
-    val swipe = Modifier.swipeSteps(
+    val swipe = Modifier.slideRoom(slide, Space.l).swipeSteps(
         onPrevious = { modes.getOrNull(modes.indexOf(view) - 1)?.let { slide.dir = -1; mode = it } },
         onNext = { modes.getOrNull(modes.indexOf(view) + 1)?.let { slide.dir = 1; mode = it } },
     )
@@ -637,10 +644,6 @@ private val FRONT: List<Outline> by lazy { outlines(BODY_FRONT) }
 private val BACK: List<Outline> by lazy { outlines(BODY_BACK) }
 
 // The body of each view as one shape (every muscle's outline, not the heads): colour sliding sideways shows only inside it.
-private val FRONT_BODY: Path by lazy { bodyShape(FRONT) }
-private val BACK_BODY: Path by lazy { bodyShape(BACK) }
-private fun bodyShape(parts: List<Outline>): Path =
-    parts.filter { it.muscle != null && it.head == null }.map { it.path }.reduce { a, b -> Path.combine(androidx.compose.ui.graphics.PathOperation.Union, a, b) }
 
 /** The colours a figure shows: each muscle's, and each limb's where it has its own. */
 internal data class SlideLayer(val colours: Map<Muscle, Color>, val limbs: Map<Pair<Muscle, Side>, Color>)
@@ -653,6 +656,14 @@ internal data class SlideLayer(val colours: Map<Muscle, Color>, val limbs: Map<P
 class ViewSlide {
     var dir = 0
     internal var last: SlideLayer? = null
+    /** The card (or section) the figure is in, in the window: the coloured figure enters from its edge and is drawn nowhere outside it. Set by [slideRoom]. */
+    internal var room: Rect? = null
+}
+
+/** Notes the card the figure in this box sits in (the box and the card's padding [pad] around it) for [slide]: the colours slide in from that card's edge. */
+fun Modifier.slideRoom(slide: ViewSlide, pad: Dp): Modifier = composed {
+    val px = with(LocalDensity.current) { pad.toPx() }
+    onGloballyPositioned { slide.room = it.boundsInRoot().inflate(px) }
 }
 
 /** One slide in progress: the colours that are leaving, the way they go, and how far along it is. */
@@ -756,6 +767,8 @@ fun BodyFigure(
     val dim by animateFloatAsState(if (open != null) 0.4f else 1f, if (motion) Motion.short() else snap(), label = "dim")
     // Gone with the figure, so it starts at normal size again when the view changes or the page is left.
     val zoom = remember { Zoom() }
+    // Where the figure is in the window, for the colours that slide in from the card's edge.
+    val origin = remember { FloatArray(2) }
     val scope = rememberCoroutineScope()
     val zoomed = zoom.scale > 1f
     if (onZoom != null) LaunchedEffect(zoom.scale) { onZoom(zoom.scale) }
@@ -771,7 +784,7 @@ fun BodyFigure(
         // A double tap would delay every single tap, so it is listened for only while there is something to undo.
         // Only the live figure glides between pages; a small copy sits inside a card, which opens into its page as a whole.
         // The same figure on a card and on the page that card opens: it moves and grows between the two, as one thing.
-        Canvas(Modifier.morphs("figure", same = true).semantics { contentDescription = description; role = Role.Image }.fillMaxWidth().aspectRatio(2 * VIEW_WIDTH / VIEW_HEIGHT).pointerInput(zoomed, interactive) {
+        Canvas(Modifier.morphs("figure", same = true).onGloballyPositioned { val at = it.positionInRoot(); origin[0] = at.x; origin[1] = at.y }.semantics { contentDescription = description; role = Role.Image }.fillMaxWidth().aspectRatio(2 * VIEW_WIDTH / VIEW_HEIGHT).pointerInput(zoomed, interactive) {
             if (!interactive) return@pointerInput
             detectTapGestures(onDoubleTap = if (zoomed) { _ -> unzoom() } else null) { tapped ->
                 // Back through the zoom to the figure as drawn at normal size.
@@ -843,7 +856,7 @@ fun BodyFigure(
             val run = travel
             val t = run?.p?.value ?: 1f
             val sliding = run != null && t < 1f
-            for ((left, parts, body) in listOf(Triple(0f, FRONT, FRONT_BODY), Triple(VIEW_WIDTH - BACK_LEFT, BACK, BACK_BODY))) {
+            for ((left, parts) in listOf(0f to FRONT, VIEW_WIDTH - BACK_LEFT to BACK)) {
                 withTransform({
                     translate(zoom.pan.x, zoom.pan.y)
                     scale(zoom.scale, zoom.scale, Offset.Zero)
@@ -866,11 +879,24 @@ fun BodyFigure(
                             drawPath(part.path, if (open != null && part.muscle != null && part.muscle != open) fill.copy(alpha = fill.alpha * dim) else fill)
                         }
                     }
-                    if (run != null && sliding) {
-                        // The leaving colours go the way the finger went and the coming ones follow from the other side, both only inside the body.
-                        for ((shown, shift) in listOf(run.from to -run.dir * VIEW_WIDTH * t, layer to run.dir * VIEW_WIDTH * (1f - t))) {
-                            clipPath(body) {
-                                translate(left = shift) {
+                }
+            }
+            if (run != null && sliding) {
+                // The coloured figure comes in from the side of the card it is in and slides over the grey body to land on it, drawn above everything in the
+                // card, not clipped to the body; the leaving colours go out the other way over the card. Nothing is drawn outside the card.
+                val card = slide?.room?.let { Rect(it.left - origin[0], it.top - origin[1], it.right - origin[0], it.bottom - origin[1]) } ?: Rect(0f, 0f, size.width, size.height)
+                val toRight = card.right
+                val toLeft = card.left - size.width
+                clipRect(card.left, card.top, card.right, card.bottom) {
+                    for ((shown, shift) in listOf(run.from to (if (run.dir > 0) toLeft else toRight) * t, layer to (if (run.dir > 0) toRight else toLeft) * (1f - t))) {
+                        translate(left = shift) {
+                            for ((left, parts) in listOf(0f to FRONT, VIEW_WIDTH - BACK_LEFT to BACK)) {
+                                withTransform({
+                                    translate(zoom.pan.x, zoom.pan.y)
+                                    scale(zoom.scale, zoom.scale, Offset.Zero)
+                                    scale(scale, scale, Offset.Zero)
+                                    translate(left, -VIEW_TOP)
+                                }) {
                                     for (part in parts) {
                                         val m = part.muscle
                                         if (part.head != null || m == null) continue

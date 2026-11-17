@@ -13,7 +13,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -36,8 +35,11 @@ import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
@@ -81,6 +83,8 @@ val LocalMorphClip = staticCompositionLocalOf<MorphClip?> { null }
 val LocalMorphCard = staticCompositionLocalOf<String?> { null }
 /** Whether a card change is under way (the card is being opened or closed); shared things match across the two pages only while it is. */
 val LocalMorphing = staticCompositionLocalOf<() -> Boolean> { { false } }
+/** Whether the shared things of what is being drawn may travel: false for a row cut off by its list, which stays where it is and fades with its card (it would show its hidden part the moment it left the list). */
+val LocalMorphEnabled = staticCompositionLocalOf<() -> Boolean> { { true } }
 /** How far the tab bar has gone down with the tabs page (0 at rest, 1 gone) while a card morph runs. */
 val LocalBarOut = staticCompositionLocalOf<State<Float>?> { null }
 
@@ -154,6 +158,9 @@ internal object MorphProbe {
     val states = java.util.concurrent.ConcurrentHashMap<String, SharedTransitionScope.SharedContentState>()
     /** Every chart line drawn travelling between a card and its page, by `<card>/<role>`. */
     val chartsDrawn: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    /** The words each travelling text shows by `<card>/<role>[/<id>]/card|page`, and where its box is in the window now. */
+    val texts = java.util.concurrent.ConcurrentHashMap<String, MorphTextSpec>()
+    val boxes = java.util.concurrent.ConcurrentHashMap<String, Rect>()
 }
 
 /**
@@ -179,7 +186,19 @@ class MorphClip : SharedTransitionScope.OverlayClip {
         private set
     init { MorphProbe.clip = this }
 
+    /**
+     * Where the top of the tab bar is now (in the window), or [Float.MAX_VALUE] when it is not in the way: a card that lies partly behind the bar
+     * is drawn only above it, so its hidden part is not shown from the tap on, and shows as the bar leaves.
+     */
+    var barTop: () -> Float = { Float.MAX_VALUE }
+
     fun begin(spot: CardSpot, pageSize: Size) { from = spot; page = pageSize }
+    /** [path] cut to the area above the tab bar. */
+    internal fun aboveBar(path: Path, bounds: Rect): Path {
+        val cut = barTop()
+        if (cut >= bounds.bottom) return path
+        return Path.combine(androidx.compose.ui.graphics.PathOperation.Intersect, path, Path().apply { addRect(Rect(bounds.left - 1f, bounds.top - 1f, bounds.right + 1f, cut)) })
+    }
     /** The card's bounds in the window, where the container starts (and, going back, ends). */
     val start: Rect? get() = from?.rect
     val outline: BorderStroke? get() = from?.border
@@ -193,7 +212,7 @@ class MorphClip : SharedTransitionScope.OverlayClip {
         draws++
         grown = max(share(bounds.width, card.rect.width, page.width), share(bounds.height, card.rect.height, page.height))
         corner = card.corner * (1f - grown)
-        return Path().apply { addRoundRect(RoundRect(bounds, CornerRadius(corner))) }
+        return aboveBar(Path().apply { addRoundRect(RoundRect(bounds, CornerRadius(corner))) }, bounds)
     }
 }
 
@@ -211,7 +230,7 @@ object NoClip : SharedTransitionScope.OverlayClip {
 class FollowClip(private val container: MorphClip) : SharedTransitionScope.OverlayClip {
     override fun getClipPath(state: SharedTransitionScope.SharedContentState, bounds: Rect, layoutDirection: LayoutDirection, density: Density): Path? {
         if (container.rect.isEmpty) return null
-        return Path().apply { addRoundRect(RoundRect(container.rect, CornerRadius(container.corner))) }
+        return container.aboveBar(Path().apply { addRoundRect(RoundRect(container.rect, CornerRadius(container.corner))) }, container.rect)
     }
 }
 
@@ -352,20 +371,25 @@ fun Modifier.morphs(role: String, id: String? = null, same: Boolean = false, sca
     if (!LocalMotion.current) return this
     val forward = LocalPageForward.current
     val morphingNow = morphingOf(key)
+    val enabledHere = LocalMorphEnabled.current
     val container = LocalMorphClip.current ?: return this
     val follow = remember(container) { FollowClip(container) }
-    val bounds: androidx.compose.animation.BoundsTransform = androidx.compose.animation.BoundsTransform { _, _ -> Motion.cardBounds(forward()) }
+    // A History row's name, date and PR count each go by legs, so they never cross ([Motion.legged]).
+    val legged = role == "row:name" || role == "row:date" || role == "row:prs"
+    val bounds: androidx.compose.animation.BoundsTransform = androidx.compose.animation.BoundsTransform { initial, target -> if (legged) Motion.legged(initial, target, forward()) else Motion.cardBounds(forward()) }
+    val full0 = if (id == null) "$key/$role" else "$key/$role/$id"
+    val side = if (LocalCardKey.current != null) "card" else "page"
     return with(shared) {
         val full = if (id == null) "$key/$role" else "$key/$role/$id"
-        val state = rememberSharedContentState(full, MorphConfig(if (role != "title" && role != "number") morphingNow else {
+        val state = rememberSharedContentState(full, MorphConfig(if (!enabledHere()) ({ false }) else if (role != "title" && role != "number") morphingNow else {
             // A title must be known to the match before the change starts, or it starts from where it is going: the card's while the tabs
             // page is shown, the page's while it is there; the pair only meets when a card change is under way or the tabs page is shown.
             // A page that is leaving for another page (its own card's change over, not under way) has nothing to match: its title stays as it is.
             ({ morphingNow() || scope.transition.targetState == EnterExitState.Visible })
         }))
         MorphProbe.states[full] = state
-        if (same) sharedElement(state, scope, bounds, zIndexInOverlay = 2f, clipInOverlayDuringTransition = if (clipped) follow else NoClip)
-        else sharedBounds(state, scope, fadeIn(if (late) Motion.rowIn() else Motion.morphIn()), fadeOut(if (late) Motion.rowOut() else Motion.morphOut()), bounds, resizeMode = if (scaled || role.startsWith("chart:") || role == "calendar") FILLED else UNSCALED, zIndexInOverlay = 2f, clipInOverlayDuringTransition = if (clipped) follow else NoClip)
+(        if (same) sharedElement(state, scope, bounds, zIndexInOverlay = 2f, clipInOverlayDuringTransition = if (clipped) follow else NoClip)
+        else sharedBounds(state, scope, fadeIn(if (late) Motion.rowIn() else Motion.morphIn()), fadeOut(if (late) Motion.rowOut() else Motion.morphOut()), bounds, resizeMode = if (scaled || role.startsWith("chart:") || role == "calendar") FILLED else UNSCALED, zIndexInOverlay = 2f, clipInOverlayDuringTransition = if (clipped) follow else NoClip)).then(if (legged) Modifier.onGloballyPositioned { MorphProbe.boxes[full0 + "/" + side] = it.boundsInRoot() } else Modifier)
     }
 }
 
@@ -373,17 +397,41 @@ fun Modifier.morphs(role: String, id: String? = null, same: Boolean = false, sca
 @Composable
 fun Modifier.morphsFromCard(role: String, id: String? = null): Modifier = if (LocalCardKey.current == null) this else morphs(role, id)
 
-/** What one side of a label shows: its words and how they are set, so the other side can draw them in the same moving box. */
-class MorphTextSpec(val text: androidx.compose.ui.text.AnnotatedString, val style: androidx.compose.ui.text.TextStyle, val color: androidx.compose.ui.graphics.Color, val maxLines: Int)
+/**
+ * What one side of a label shows: its words and how they are set, so the other side can draw them in the same moving box. [rest] is the
+ * constraints this side's words are laid out in at rest (noted when its screen is laid out, so a travelling copy of the words is set
+ * exactly as they are there: the same width, the same ellipsis), [overflowed] and [lines] how they came out.
+ */
+class MorphTextSpec(
+    val text: androidx.compose.ui.text.AnnotatedString, val style: androidx.compose.ui.text.TextStyle, val color: androidx.compose.ui.graphics.Color, val maxLines: Int,
+    val overflow: androidx.compose.ui.text.style.TextOverflow = androidx.compose.ui.text.style.TextOverflow.Clip, val softWrap: Boolean = true,
+    val textAlign: androidx.compose.ui.text.style.TextAlign? = null,
+) {
+    @Volatile var rest: androidx.compose.ui.unit.Constraints? = null
+    /** How wide the words come out at rest, in px: the box that carries them is scaled to fit between the two sides' widths. */
+    @Volatile var shown = 0
+    /** The width of the box that carries the words at rest, and now (the box travels by legs, so its width is not the clock's progress). */
+    @Volatile var boxW = 0
+    @Volatile var boxNow = 0
+    @Volatile var overflowed = false
+    @Volatile var lines = 1
+    /** Whether the other side's words are set the same way and both fit, so one text can stand for both while they travel. */
+    fun looksLike(o: MorphTextSpec) = text == o.text && style == o.style && color == o.color && maxLines == o.maxLines && overflow == o.overflow && softWrap == o.softWrap && textAlign == o.textAlign &&
+        !overflowed && !o.overflowed && lines == o.lines
+}
 
 /** The words each card label and page title (or number) shows, by `<card>/<role>/card|page`. */
 val LocalMorphTexts = staticCompositionLocalOf<androidx.compose.runtime.snapshots.SnapshotStateMap<String, MorphTextSpec>?> { null }
 
 /**
  * A text that is the card's label (or number) and, on the page it opens, the page's title (or number), in different words or form
- * ("WEEK STREAK" and "Trophies", "6" and "6 weeks"): one box that travels from the label's place to the title's, resizing, with the
- * old words fading out as the new fade in inside that same box, so there are never two copies at two places. Both sides draw this same
- * way ([role] "title" or "number"; the page's passes [onPage]). With no card or page to pair with, or animations off, it is a plain Text.
+ * ("WEEK STREAK" and "Trophies", "6" and "6 weeks"): one box that travels from the label's place to the title's, resizing. Each side's
+ * words are always set the way that side sets them at rest (its own width, lines, ellipsis, size and colour, never unbounded), so
+ * nothing about them changes the moment the card is tapped or the move ends; while the box travels it draws both, each scaled from its
+ * own size to the box's and anchored at the start, the card's fading out and the page's in during the middle of the way
+ * ([Motion.textOut], [Motion.textIn]), which hides every difference between them (the ellipsis, the wording, the weight, the colour).
+ * The words never draw outside the box. Both sides draw this same way ([role] "title" or "number"; the page's passes [onPage]). With no
+ * card or page to pair with, or animations off, it is a plain Text.
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -393,6 +441,8 @@ fun MorphText(
     fontWeight: androidx.compose.ui.text.font.FontWeight? = null, textAlign: androidx.compose.ui.text.style.TextAlign? = null,
     maxLines: Int = Int.MAX_VALUE, overflow: androidx.compose.ui.text.style.TextOverflow = androidx.compose.ui.text.style.TextOverflow.Clip, softWrap: Boolean = true,
     onTextLayout: ((androidx.compose.ui.text.TextLayoutResult) -> Unit)? = null, id: String? = null,
+    /** Where the words sit in their box: at its start, or at its end for a column of figures set to the right. */
+    alignment: androidx.compose.ui.Alignment = androidx.compose.ui.Alignment.CenterStart,
 ) {
     val resolved = androidx.compose.material3.LocalTextStyle.current.merge(style).let { if (fontWeight != null) it.merge(androidx.compose.ui.text.TextStyle(fontWeight = fontWeight)) else it }
     val ink = if (color.isSpecified) color else if (resolved.color.isSpecified) resolved.color else androidx.compose.material3.LocalContentColor.current
@@ -407,42 +457,95 @@ fun MorphText(
         return
     }
     val cardSide = cardKey != null
-    val mine = remember(text, resolved, ink, maxLines) { MorphTextSpec(text, resolved, ink, maxLines) }
+    val enabled = LocalMorphEnabled.current
+    val atEnd = alignment == androidx.compose.ui.Alignment.CenterEnd
+    val mine = remember(text, resolved, ink, maxLines, overflow, softWrap, textAlign) { MorphTextSpec(text, resolved, ink, maxLines, overflow, softWrap, textAlign) }
     // [id] tells one text of a kind from another (a workout's name on a row of the History card and on its card on the page).
     val named = if (id == null) "$key/$role/" else "$key/$role/$id/"
     val here = named + if (cardSide) "card" else "page"
     val there = named + if (cardSide) "page" else "card"
     DisposableEffect(here, mine) {
         texts[here] = mine
-        onDispose { if (texts[here] === mine) texts.remove(here) }
+        MorphProbe.texts[here] = mine
+        onDispose { if (texts[here] === mine) texts.remove(here); MorphProbe.texts.remove(here, mine); MorphProbe.boxes.remove(here) }
     }
-    // The very same words on both sides ("Pull" on the card and "Pull" on the page) are one text that only changes size on the way: no second copy to cross over.
-    val other = texts[there]?.takeIf { it.text.text != text.text }
-    val sameWords = texts[there]?.takeIf { it.text.text == text.text }
-    val sizeRatio = if (sameWords != null && sameWords.style.fontSize.isSp && resolved.fontSize.isSp && resolved.fontSize.value > 0f) sameWords.style.fontSize.value / resolved.fontSize.value else 1f
+    val other = texts[there]
+    // The words' scale as the box travels: each version is as wide as the box's words are, the card's at its own width at 0 and the page's at 1 (so a
+    // version never sticks out of the box, whatever the two sizes and wordings are).
+    fun fit(version: MorphTextSpec, p: Float): Float {
+        val card = (if (cardSide) mine.shown else other?.shown ?: 0).toFloat()
+        val page = (if (cardSide) other?.shown ?: 0 else mine.shown).toFloat()
+        if (card <= 0f || page <= 0f || version.shown <= 0) return 1f
+        // How far the box has come, by its width when the two boxes differ in width (it goes by legs), else by the clock.
+        val boxCard = (if (cardSide) mine.boxW else other?.boxW ?: 0).toFloat()
+        val boxPage = (if (cardSide) other?.boxW ?: 0 else mine.boxW).toFloat()
+        val u = if (Math.abs(boxPage - boxCard) > 2f && mine.boxNow > 0) ((mine.boxNow - boxCard) / (boxPage - boxCard)).coerceIn(0f, 1f) else p
+        return (card + (page - card) * u) / version.shown
+    }
     // How far the label has become the title (0 the card's words, 1 the page's), on the clock the box travels on.
     val toPage by scope.transition.animateFloat({ if (!morphingNow()) snap() else Motion.cardBounds(forward()) }, label = "label") {
         if (cardSide) (if (it == EnterExitState.Visible) 0f else 1f) else (if (it == EnterExitState.Visible) 1f else 0f)
     }
-    // A page that is leaving for another page keeps its title as it is: the fade belongs to the change between a card and its own page.
-    val mineAlpha = { if (cardSide) 1f - toPage else if (morphingNow()) toPage else 1f }
-    // Clipped to the container like the rest: the words keep their size while the box resizes, so longer words would stick out of it.
-    Box(modifier.morphs(role, id, same = true), contentAlignment = androidx.compose.ui.Alignment.CenterStart) {
+    // Words set where they rest, whatever box they are drawn in: the constraints are noted when the screen is laid out, and used while the box travels.
+    val resting = Modifier.layout { measurable, constraints ->
+        val rest = mine.rest
+        if (isLookingAhead) mine.rest = constraints
+        val placeable = measurable.measure(if (!isLookingAhead && rest != null && morphingNow()) rest else constraints)
+        if (isLookingAhead) mine.shown = placeable.width
+        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
+    Box(
+        modifier.morphs(role, id, same = true).layout { measurable, constraints ->
+            val placeable = measurable.measure(constraints)
+            if (isLookingAhead) mine.boxW = placeable.width else mine.boxNow = placeable.width
+            layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+        }.onGloballyPositioned { MorphProbe.boxes[here] = it.boundsInRoot() }.drawWithContent {
+            // Nothing that travels is drawn outside its own box.
+            if (morphingNow()) clipRect { this@drawWithContent.drawContent() } else drawContent()
+        },
+        contentAlignment = alignment,
+    ) {
         androidx.compose.material3.Text(
-            // While it travels the box is any size, and the words keep theirs; at rest they fit (or shrink) in the room they have.
-            text, (if (morphingNow()) Modifier.wrapContentWidth(androidx.compose.ui.Alignment.Start, unbounded = true) else Modifier).graphicsLayer {
-                if (sameWords != null && morphingNow()) {
-                    val grow = sizeRatio + (1f - sizeRatio) * mineAlpha()
-                    scaleX = grow; scaleY = grow; transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f)
-                // A row with no words to become (it is going below the page) keeps its own until the row itself fades.
-                } else alpha = if (id != null && texts[there] == null) 1f else mineAlpha()
+            text, resting.graphicsLayer {
+                if (!morphingNow()) return@graphicsLayer
+                val p = toPage
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(if (atEnd) 1f else 0f, 0.5f)
+                when {
+                    // Words with no counterpart (a row going below the page, a label the page has no title for) stay as they are: the card's content fades with the
+                    // card and the page's comes in with the page, in their own places, so there is nothing for these words to cross over to.
+                    other == null || !enabled() -> {}
+                    mine.looksLike(other) -> {}
+                    else -> {
+                        alpha = if (cardSide) Motion.textOut(p) else Motion.textIn(p)
+                        val s = fit(mine, p)
+                        scaleX = s; scaleY = s
+                    }
+                }
             },
             ink, style = resolved, textAlign = textAlign, maxLines = maxLines, overflow = overflow, softWrap = softWrap,
             // What the box does while it travels says nothing about whether the words fit where they rest (a number that shrinks to fit must not shrink for good).
-            onTextLayout = { if (!morphingNow()) onTextLayout?.invoke(it) },
+            onTextLayout = {
+                mine.overflowed = it.hasVisualOverflow; mine.lines = it.lineCount
+                if (!morphingNow()) onTextLayout?.invoke(it)
+            },
         )
-        if (other != null) Box(Modifier.matchParentSize().wrapContentSize(androidx.compose.ui.Alignment.CenterStart, unbounded = true).graphicsLayer { alpha = 1f - mineAlpha() }) {
-            androidx.compose.material3.Text(other.text, color = other.color, style = other.style, maxLines = other.maxLines, softWrap = false)
+        // The other side's words, set as that side sets them, drawn in the same box (they never make it bigger).
+        if (other != null) Box(Modifier.matchParentSize().wrapContentSize(alignment, unbounded = true)) {
+            androidx.compose.material3.Text(
+                other.text,
+                Modifier.layout { measurable, constraints ->
+                    val placeable = measurable.measure(other.rest ?: constraints)
+                    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+                }.clearAndSetSemantics { }.graphicsLayer {
+                    if (!morphingNow() || !enabled() || mine.looksLike(other)) { alpha = 0f; return@graphicsLayer }
+                    val p = toPage
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(if (atEnd) 1f else 0f, 0.5f)
+                    alpha = if (cardSide) Motion.textIn(p) else Motion.textOut(p)
+                    val s = fit(other, p)
+                    scaleX = s; scaleY = s
+                },
+                other.color, style = other.style, textAlign = other.textAlign, maxLines = other.maxLines, overflow = other.overflow, softWrap = other.softWrap,
+            )
         }
     }
 }
@@ -454,7 +557,14 @@ fun MorphText(
 ) = MorphText(androidx.compose.ui.text.AnnotatedString(text), role, modifier, onPage, fontWeight = fontWeight, maxLines = maxLines, overflow = overflow)
 
 /** One side of a chart that morphs: its line as points in the window (x0, y0, x1, y1, ...), resampled to [CHART_SAMPLES], and how it is drawn. */
-class ChartLine(val points: FloatArray, val color: androidx.compose.ui.graphics.Color, val width: Float, val dot: androidx.compose.ui.graphics.Color?, val dotRadius: Float)
+class ChartLine(val points: FloatArray, val color: androidx.compose.ui.graphics.Color, val width: Float, val dot: androidx.compose.ui.graphics.Color?, val dotRadius: Float, val wash: ChartWash? = null)
+
+/**
+ * The tint under a chart's line, down to [floor] (all y in the window): [alphaTop] of the line's colour from [top] fading to [alphaBottom] at the
+ * floor, and, when [reach] is more than 0, fading out sideways over that many px at the line's far end (and at its start unless [edge], the
+ * line running to the card's edge). The travelling line carries it, so it moves and reshapes with the line instead of fading where it was.
+ */
+class ChartWash(val floor: Float, val top: Float, val alphaTop: Float, val alphaBottom: Float, val reach: Float, val edge: Boolean)
 
 /** The charts' lines by `<card>/<role>/card|page`. */
 val LocalChartLines = staticCompositionLocalOf<androidx.compose.runtime.snapshots.SnapshotStateMap<String, ChartLine>?> { null }
@@ -501,6 +611,7 @@ class ChartMorphSide(val hidden: () -> Boolean, val modifier: Modifier)
 @Composable
 fun rememberChartMorph(
     role: String?, color: androidx.compose.ui.graphics.Color, width: Float, dot: androidx.compose.ui.graphics.Color? = null, dotRadius: Float = 0f,
+    wash: ((Size) -> ChartWash?)? = null,
     line: (Size) -> Pair<FloatArray, FloatArray>?,
 ): ChartMorphSide {
     val cardKey = LocalCardKey.current
@@ -520,7 +631,8 @@ fun rememberChartMorph(
         Modifier.onGloballyPositioned { c ->
             val (xs, ys) = current.value(Size(c.size.width.toFloat(), c.size.height.toFloat())) ?: return@onGloballyPositioned run { lines.remove(here); Unit }
             if (xs.size < 2) { lines.remove(here); return@onGloballyPositioned }
-            lines[here] = ChartLine(resampleLine(xs, ys, c.positionInRoot()), color, width, dot, dotRadius)
+            val at = c.positionInRoot()
+            lines[here] = ChartLine(resampleLine(xs, ys, at), color, width, dot, dotRadius, wash?.invoke(Size(c.size.width.toFloat(), c.size.height.toFloat()))?.let { ChartWash(it.floor + at.y, it.top + at.y, it.alphaTop, it.alphaBottom, it.reach, it.edge) })
         },
     )
 }
@@ -552,6 +664,36 @@ fun ChartMorphLine(card: String) {
                         // Already the curve, sampled finely: straight steps between the samples, so the end is the page's line exactly.
                         val path = Path().apply { moveTo(xs[0], ys[0]); for (i in 1 until n) lineTo(xs[i], ys[i]) }
                         val color = androidx.compose.ui.graphics.lerp(from.color, to.color, q)
+                        // The tint under the line goes with it: from the card's to the page's (or to none, or from none).
+                        fun flat(w: ChartWash) = ChartWash(w.floor, w.top, 0f, 0f, w.reach, w.edge)
+                        val a = from.wash ?: to.wash?.let(::flat)
+                        val b = to.wash ?: from.wash?.let(::flat)
+                        if (a != null && b != null) {
+                            fun mix(x: Float, y: Float) = x + (y - x) * q
+                            val top = mix(a.top, b.top)
+                            val floor = mix(a.floor, b.floor)
+                            val above = mix(a.alphaTop, b.alphaTop)
+                            val below = mix(a.alphaBottom, b.alphaBottom)
+                            val reach = mix(a.reach, b.reach)
+                            if (above > 0f || below > 0f) {
+                                val tint = Path().apply { addPath(path); lineTo(xs.last(), floor); lineTo(xs.first(), floor); close() }
+                                val brush = androidx.compose.ui.graphics.Brush.verticalGradient(listOf(color.copy(alpha = above), color.copy(alpha = below)), startY = top, endY = floor)
+                                if (reach > 0f) {
+                                    val edge = if (q < 0.5f) a.edge else b.edge
+                                    val share = reach / (xs.last() - xs.first()).coerceAtLeast(1f)
+                                    val inFrom = if (edge) 0f else share.coerceAtMost(0.5f)
+                                    val mask = androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                        0f to (if (edge) androidx.compose.ui.graphics.Color.Black else androidx.compose.ui.graphics.Color.Transparent), inFrom to androidx.compose.ui.graphics.Color.Black,
+                                        (1f - share).coerceAtLeast(inFrom) to androidx.compose.ui.graphics.Color.Black, 1f to androidx.compose.ui.graphics.Color.Transparent,
+                                        startX = xs.first(), endX = xs.last(),
+                                    )
+                                    drawContext.canvas.saveLayer(tint.getBounds(), androidx.compose.ui.graphics.Paint())
+                                    drawPath(tint, brush)
+                                    drawRect(mask, blendMode = androidx.compose.ui.graphics.BlendMode.DstIn)
+                                    drawContext.canvas.restore()
+                                } else drawPath(tint, brush)
+                            }
+                        }
                         drawPath(path, color, style = Stroke(from.width + (to.width - from.width) * q, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
                         val dot = to.dot ?: from.dot
                         if (dot != null) {

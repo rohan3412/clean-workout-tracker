@@ -601,7 +601,12 @@ internal fun Sparkline(values: List<Double>, modifier: Modifier = Modifier, edge
         // A level line runs along the middle.
         FloatArray(values.size) { if (span == null) size.height / 2 else top + (1 - ((values[it] - low) / span).toFloat()) * (size.height - top - bottom) }
     val lineWidth = with(density) { if (fade) look.chartLineWidth.dp.toPx() else 2.dp.toPx() }
-    val travel = rememberChartMorph(morph, color, lineWidth, if (fade) dot else null, with(density) { 3.dp.toPx() }) { line(it) }
+    val reachPx = with(density) { 28.dp.toPx() }
+    val travel = rememberChartMorph(
+        morph, color, lineWidth, if (fade) dot else null, with(density) { 3.dp.toPx() },
+        // A line with no tint still says where its floor is, so the other side's tint keeps its shape as it goes (or comes) to nothing.
+        wash = { size -> if (fade) ChartWash(size.height, top, 0.16f, 0f, reachPx, edge) else ChartWash(size.height, top, if (edge) 0.12f else 0f, if (edge) 0.12f else 0f, 0f, edge) },
+    ) { line(it) }
     Spacer(modifier.fillMaxWidth().height(height).then(travel.modifier).drawWithCache {
         val (xs, ys) = line(size)
         val path = Path()
@@ -622,7 +627,8 @@ internal fun Sparkline(values: List<Double>, modifier: Modifier = Modifier, edge
         } else null
         val stroke = Stroke(if (fade) look.chartLineWidth.dp.toPx() else 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         onDrawBehind {
-            if (wash != null) fill?.let {
+            // While the card opens or closes, the tint travels with the line (see [ChartWash]).
+            if (travel.hidden()) { } else if (wash != null) fill?.let {
                 drawContext.canvas.saveLayer(androidx.compose.ui.geometry.Rect(Offset.Zero, size), androidx.compose.ui.graphics.Paint())
                 drawPath(it, wash)
                 drawRect(sideFade!!, blendMode = androidx.compose.ui.graphics.BlendMode.DstIn)
@@ -858,6 +864,7 @@ fun SplitLineChart(
     val travel = rememberChartMorph(
         if (bars || hasSplit || imbalance) null else morph, line, with(density) { (if (fade) look.chartLineWidth else 2.5f).dp.toPx() },
         if (fade) dotColor else null, with(density) { 4.5.dp.toPx() },
+        wash = { size -> ChartWash(size.height - with(density) { 10.dp.toPx() }, with(density) { 10.dp.toPx() }, if (fade) 0.16f else 0f, 0f, 0f, false) },
     ) { size ->
         val left = with(density) { 46.dp.toPx() }
         val top = with(density) { 10.dp.toPx() }
@@ -954,9 +961,9 @@ fun SplitLineChart(
                 if (barMarks != null) drawBars(barMarks, line)
                 else if (marks != null) drawSplitMarks(marks, line, linesOnly = smoothed)
                 else {
-                    fadeFill?.let { drawPath(it, fadeBrush!!) }
-                    // While a card opens into this page, the line travelling from the card's chart stands in for this one.
+                    // While a card opens into this page, the line travelling from the card's chart (and the tint under it) stands in for this one.
                     if (!travel.hidden()) {
+                        fadeFill?.let { drawPath(it, fadeBrush!!) }
                         drawPath(path, line, style = stroke)
                         if (fade && !imbalance) { drawCircle(halo, 6.5.dp.toPx(), lastAt); drawCircle(dotColor, 4.5.dp.toPx(), lastAt) }
                     }

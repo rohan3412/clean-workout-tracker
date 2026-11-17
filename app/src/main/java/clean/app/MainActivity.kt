@@ -622,9 +622,15 @@ private fun Tabs(model: AppModel) {
             val barOut = LocalBarOut.current
             // The workout banner growing into the workout stays where it is: the bar is under the growing container anyway, and the banner's own bounds are the container's start.
             val bannerOpens = LocalMorphCard.current?.startsWith("banner:") == true
+            // A card that lies partly behind the bar is drawn only above the bar while it is there (see [MorphClip.barTop]), so what the bar hides stays hidden
+            // from the tap on and shows as the bar leaves.
+            val clipForBar = LocalMorphClip.current
+            val barSpot = remember { floatArrayOf(Float.MAX_VALUE, 0f) }
+            val barSlide = with(LocalDensity.current) { 48.dp.toPx() }
+            SideEffect { clipForBar?.barTop = { if (bannerOpens) Float.MAX_VALUE else barSpot[0] + (barOut?.value ?: 0f) * (barSpot[1] + barSlide) } }
             TabBar(
                 model, order, ends[order[pager.currentPage.coerceIn(order.indices)]] == true, banner, nav,
-                Modifier.align(Alignment.BottomCenter).graphicsLayer { translationY = if (bannerOpens) 0f else (barOut?.value ?: 0f) * (size.height + 48.dp.toPx()) },
+                Modifier.align(Alignment.BottomCenter).onGloballyPositioned { barSpot[0] = it.positionInRoot().y; barSpot[1] = it.size.height.toFloat() }.graphicsLayer { translationY = if (bannerOpens) 0f else (barOut?.value ?: 0f) * (size.height + 48.dp.toPx()) },
                 // A swipe moves the pill with the finger; a tap's blink glides it on its own clock.
                 follow = { if (pager.isScrollInProgress && blink.value == BLINK_REST) pager.currentPage + pager.currentPageOffsetFraction else null },
                 morph = true,
