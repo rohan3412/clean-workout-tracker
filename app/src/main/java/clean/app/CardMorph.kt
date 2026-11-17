@@ -389,7 +389,7 @@ fun Modifier.morphs(role: String, id: String? = null, same: Boolean = false, sca
         }))
         MorphProbe.states[full] = state
 (        if (same) sharedElement(state, scope, bounds, zIndexInOverlay = 2f, clipInOverlayDuringTransition = if (clipped) follow else NoClip)
-        else sharedBounds(state, scope, fadeIn(if (late) Motion.rowIn() else Motion.morphIn()), fadeOut(if (late) Motion.rowOut() else Motion.morphOut()), bounds, resizeMode = if (scaled || role.startsWith("chart:") || role == "calendar") FILLED else UNSCALED, zIndexInOverlay = 2f, clipInOverlayDuringTransition = if (clipped) follow else NoClip)).then(if (legged) Modifier.onGloballyPositioned { MorphProbe.boxes[full0 + "/" + side] = it.boundsInRoot() } else Modifier)
+        else sharedBounds(state, scope, fadeIn(if (late) Motion.rowIn() else Motion.morphIn()), fadeOut(if (late) Motion.rowOut() else Motion.morphOut()), bounds, resizeMode = if (scaled || role.startsWith("chart:") || role == "calendar") FILLED else UNSCALED, zIndexInOverlay = 2f, clipInOverlayDuringTransition = if (clipped) follow else NoClip)).then(Modifier.onGloballyPositioned { MorphProbe.boxes[full0 + "/" + side] = it.boundsInRoot() })
     }
 }
 

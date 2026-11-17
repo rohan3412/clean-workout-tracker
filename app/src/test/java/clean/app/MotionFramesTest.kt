@@ -131,6 +131,7 @@ class MotionFramesTest {
             // The last workout first, wide, so it is on the screen in every look.
             if (lastFirst) dao.put(Kv("home.cards:${dao.get("active")}", "last:w,streak:h,volume:h,week:h"))
         }
+        MorphProbe.boxes.clear()
         val scenario = ActivityScenario.launch(MainActivity::class.java)
         scenario.onActivity { model = ViewModelProvider(it)[AppModel::class.java]; window = it.window.decorView }
         compose.waitUntil(60_000) { model.loaded }
@@ -225,7 +226,7 @@ class MotionFramesTest {
     }
 
     /** What the container did in one change: the bounds it was drawn at in each frame it was drawn, and how far it had grown. */
-    private class Trail(val rects: List<Rect>, val grown: List<Float>, val matched: Set<String>, val ended: Int)
+    private class Trail(val rects: List<Rect>, val grown: List<Float>, val matched: Set<String>, val ended: Int, val before: Map<String, Rect> = emptyMap(), val after: Map<String, Rect> = emptyMap(), val boxes: List<Map<String, Rect>> = emptyList(), val progress: List<Float> = emptyList(), val drawn: List<Boolean> = emptyList())
 
     private fun trail(act: () -> Unit, frames: MutableList<Bitmap>, ms: Int = 640, perFrame: () -> Unit = {}): Trail {
         compose.mainClock.autoAdvance = false
@@ -237,11 +238,17 @@ class MotionFramesTest {
         var seen = clip.draws
         val matched = HashSet<String>()
         var ended = -1
+        val before = HashMap(MorphProbe.boxes)
+        val boxes = mutableListOf<Map<String, Rect>>()
+        val progress = mutableListOf<Float>()
+        val drawn = mutableListOf<Boolean>()
+        val draws0 = clip.draws
         compose.runOnIdle(act)
         var t = 0
         while (t < ms) {
             compose.mainClock.advanceTimeBy(16); frames += frame(); t += 16
             perFrame()
+            boxes += HashMap(MorphProbe.boxes); progress += clip.grown; drawn += (clip.draws != draws0)
             for ((k, st) in MorphProbe.states) if (st.isMatchFound) matched += k
             val drew = clip.draws != seen
             if (drew) { seen = clip.draws; rects += clip.rect; grown += clip.grown }
@@ -251,7 +258,59 @@ class MotionFramesTest {
         compose.mainClock.advanceTimeBy(3000)
         frames += frame()
         compose.mainClock.autoAdvance = true
-        return Trail(rects, grown, matched, ended)
+        return Trail(rects, grown, matched, ended, before, HashMap(MorphProbe.boxes), boxes, progress, drawn)
+    }
+
+    /**
+     * Everything that travels is on the container's one clock (Stage H): every shared box that moved (a title, a number, a History row's name,
+     * date and PR count, the box a row goes to below the page, the figure, a photo), normalised by its own start-to-end distance, is where the
+     * container's progress says in every frame, never early or late: at its start on frame 0 and at its end by the last frame of the move.
+     * A box that goes by legs is compared along its legs ([Motion.leggedAt]). Boxes that do not move (under 24 px) are skipped.
+     * [from] and [to] are the sides the box starts and ends on (`card` and `page` opening, the other way back).
+     */
+    private fun onTheClock(label: String, t: Trail, forward: Boolean, need: Boolean = false) {
+        val from = if (forward) "card" else "page"
+        val to = if (forward) "page" else "card"
+        val legged = listOf("/row:name/", "/row:date/", "/row:prs/")
+        var checked = 0
+        val off = mutableListOf<String>()
+        // The move: up to the first frame the container has arrived (the sides are swapped after it).
+        val n = (t.progress.indexOfFirst { if (forward) it >= 0.999f else it <= 0.001f }.let { if (it < 0) t.progress.size else it + 1 }).coerceAtMost(t.boxes.size)
+        for ((k, was) in t.before) {
+            if (!k.endsWith("/$from")) continue
+            // (where it rests as the change begins: the layout may have moved since the last time it was noted)
+            val start = t.boxes.firstOrNull()?.get(k) ?: was
+            val base = k.removeSuffix("/$from")
+            if (base !in t.matched) continue
+            val end = t.after["$base/$to"] ?: continue
+            // (the container's progress is read from its size, which a tall card's photos do not follow on Back; they are checked opening)
+            if (!forward && base.contains("/photo/")) continue
+            // (the side that is not drawn is laid out empty, at the window's corner)
+            val side = listOf(to).firstOrNull { sd -> t.boxes.take(n).drop(2).all { (it["$base/$sd"]?.width ?: 0f) > 0f } } ?: continue
+            val track = t.boxes.take(n).map { it["$base/$side"] ?: Rect.Zero }
+            val isLegged = legged.any { base.contains(it) }
+            val distance = maxOf(Math.abs(end.center.x - start.center.x), Math.abs(end.center.y - start.center.y))
+            if (distance < 24f) continue
+            checked++
+            // (the first two frames' boxes are those of the layout before the change, and a frame in which the container has not been drawn yet still reports where the last change ended)
+            var worst = 0f
+            var worstAt = ""
+            for (i in track.indices) {
+                if (i < 2 || !t.drawn[i]) continue
+                // the change's clock: frame 1 is its time 0, and a frame is 16 ms
+                // (the banner's container starts two frames after the tap, so it and Back read the container's own progress, which is not the shares of a photo's tall card)
+                val p = if (forward && base.startsWith("banner:")) t.progress[i] else if (forward) Motion.Emphasized.transform(((i - 1) * 16f / Motion.CARD_TO_PAGE).coerceIn(0f, 1f))
+                    else 1f - t.progress[i]
+                val want = if (isLegged) Motion.leggedAt(start, end, forward, p) else androidx.compose.ui.geometry.lerp(start, end, p)
+                // (a box that changes size is held by its start edge, its centre or its end edge: any is on the clock)
+                val gap = maxOf(minOf(Math.abs(track[i].left - want.left), Math.abs(track[i].center.x - want.center.x), Math.abs(track[i].right - want.right)), minOf(Math.abs(track[i].top - want.top), Math.abs(track[i].center.y - want.center.y), Math.abs(track[i].bottom - want.bottom)))
+                if (gap > worst) { worst = gap; worstAt = "frame $i progress $p (container ${t.progress[i]}): at ${track[i]} want $want" }
+            }
+            if (worst > 0.06f * distance + 2f) off += "$base ($side) distance $distance worst $worstAt"
+        }
+        println("$label: $checked travelling boxes checked against the clock")
+        if (need) assertTrue("$label: nothing travelling was checked: before ${t.before.keys.sorted()} after ${t.after.keys.sorted()}", checked > 0)
+        assertTrue("$label: boxes off the container's clock: ${off.take(6)} (${off.size})", off.isEmpty())
     }
 
     private fun pick(frames: List<Bitmap>, every: Int, count: Int) = (0 until frames.size step every).map { frames[it] }.take(count) + frames.last()
@@ -274,6 +333,7 @@ class MotionFramesTest {
         val openFrames = mutableListOf<Bitmap>()
         val open = trail({ compose.onNodeWithTag("card:$key", useUnmergedTree = true).performTouchInput { click(androidx.compose.ui.geometry.Offset(8f, 8f)) } }, openFrames)
         assertTrue("$name: the card did not open a page", model.stack.isNotEmpty())
+        if (travel) onTheClock("$name open", open, true)
         val tag = preset ?: "default"
         saveStrip("$name-open-$tag", pick(openFrames, 3, 11), 6)
         saveStrip("$name-open-$tag-fine", openFrames.subList(0, 12), 6)
@@ -290,6 +350,7 @@ class MotionFramesTest {
         MorphProbe.chartsDrawn.clear()
         val backFrames = mutableListOf<Bitmap>()
         val back = trail({ model.back() }, backFrames)
+        if (travel) onTheClock("$name back", back, false)
         for (role in moving) assertTrue("$name back: $role never matched; matched ${back.matched}", "$key/$role" in back.matched)
         stillAtTheStart("$name back", backFrames, null)
         settledAndStill("$name back", backFrames, "$name-back-$tag", back.ended)
@@ -524,6 +585,7 @@ class MotionFramesTest {
         val openFrames = mutableListOf<Bitmap>()
         val open = trail({ compose.onNodeWithTag("card:$key", useUnmergedTree = true).performTouchInput { click(androidx.compose.ui.geometry.Offset(8f, 8f)) } }, openFrames)
         assertTrue("history rows: the card did not open a page", model.stack.isNotEmpty())
+        onTheClock("history rows open", open, true, need = true)
         saveStrip("history-rows-open-$tag", pick(openFrames, 2, 17), 6)
 // Once the move has run its 500 ms nothing of the rows is left over the page: the frames after it are the frame at rest.
         stillAtTheStart("history rows open", openFrames, historyCard, androidx.compose.ui.geometry.Offset(historyCard.left + 8f, historyCard.top + 8f))
@@ -538,6 +600,7 @@ class MotionFramesTest {
         assertTrue("history rows open: no row travelled below the page; matched ${open.matched}", below.isNotEmpty())
         val backFrames = mutableListOf<Bitmap>()
         val back = trail({ model.back() }, backFrames)
+        onTheClock("history rows back", back, false, need = true)
         stillAtTheStart("history rows back", backFrames, null)
         settledAndStill("history rows back", backFrames, "history-rows-back-$tag", back.ended)
         saveStrip("history-rows-back-$tag", pick(backFrames, 2, 17), 6)
@@ -568,6 +631,7 @@ class MotionFramesTest {
         val openFrames = mutableListOf<Bitmap>()
         val open = trail({ compose.onNodeWithTag("card:$key", useUnmergedTree = true).performTouchInput { click(androidx.compose.ui.geometry.Offset(8f, 8f)) } }, openFrames)
         assertTrue("$name: the card did not open a page", model.stack.size >= 2)
+        onTheClock("$name open", open, true)
         stillAtTheStart("$name open", openFrames, card, androidx.compose.ui.geometry.Offset(card.left + 8f, card.top + 8f))
         settledAndStill("$name open", openFrames, "$name-open-$tag", open.ended)
         saveStrip("$name-open-$tag", pick(openFrames, 3, 11), 6)
@@ -588,6 +652,7 @@ class MotionFramesTest {
         assertTrue("$name open: $stillMoving pixels still differ after the move", stillMoving * 1000 < atEnd.size)
         val backFrames = mutableListOf<Bitmap>()
         val back = trail({ model.back() }, backFrames)
+        onTheClock("$name back", back, false)
         saveStrip("$name-back-$tag", pick(backFrames, 3, 11), 6)
         saveStrip("$name-back-$tag-fine", backFrames.subList(0, 12), 6)
         saveStrip("$name-back-$tag-rest", listOf(backFrames[backFrames.size - 3], backFrames[backFrames.size - 2], backFrames.last()), 3, 1)
@@ -824,7 +889,6 @@ class MotionFramesTest {
         trail({ model.back() }, backFrames, perFrame = { backShots += snapshot() })
         saveStrip("history-rows-legs-back", pick(backFrames, 2, 17), 6)
         // Where each box is at time t on its way, as the legs say ([Motion.legged]): no two boxes of one row overlap at any time, either way.
-        val conv = Rect.VectorConverter
         val overlaps = mutableListOf<String>()
         for (forward in listOf(true, false)) for (date in dates) {
             val tracks = roles.mapNotNull { role ->
@@ -832,23 +896,23 @@ class MotionFramesTest {
                 val card = atCard["$key/$role/$date/page"] ?: return@mapNotNull null
                 val from = if (forward) row else card
                 val to = if (forward) card else row
-                val spec = Motion.legged(from, to, forward).vectorize(conv)
-                role to { ms: Int -> conv.convertFromVector(spec.getValueFromNanos(ms * 1_000_000L, conv.convertToVector(from), conv.convertToVector(to), androidx.compose.animation.core.AnimationVector4D(0f, 0f, 0f, 0f))) }
+                role to { p: Float -> Motion.leggedAt(from, to, forward, p) }
             }
             assertTrue("no row boxes were found for $date", tracks.size >= 2)
-            for (ms in 0..500 step 8) for (a in tracks.indices) for (b in a + 1 until tracks.size) {
-                val ra = tracks[a].second(ms)
-                val rb = tracks[b].second(ms)
+            for (step in 0..200) for (a in tracks.indices) for (b in a + 1 until tracks.size) {
+                val p = step / 200f
+                val ra = tracks[a].second(p)
+                val rb = tracks[b].second(p)
                 val w = minOf(ra.right, rb.right) - maxOf(ra.left, rb.left)
                 val h = minOf(ra.bottom, rb.bottom) - maxOf(ra.top, rb.top)
-                if (w > 1f && h > 1f) overlaps += "${if (forward) "open" else "back"} $date at $ms ms: ${tracks[a].first} $ra and ${tracks[b].first} $rb overlap by $w x $h"
+                if (w > 1f && h > 1f) overlaps += "${if (forward) "open" else "back"} $date at $p: ${tracks[a].first} $ra and ${tracks[b].first} $rb overlap by $w x $h"
             }
         }
         assertTrue("boxes of one row overlap on their way: ${overlaps.take(6)}", overlaps.isEmpty())
-        // The real boxes do as the legs say: on opening, a date and a PR count stay at their x while they go to their line (the first 200 ms).
+        // The real boxes do as the legs say: on opening, a date and a PR count stay at their x while they go to their line (the first 64 ms, the legs being on the emphasized clock).
         for (date in dates.take(1)) for (role in listOf("row:date", "row:prs")) {
             val first = openShots.first()["$key/$role/$date/page"]!!
-            for (shot in openShots.take(10)) {
+            for (shot in openShots.take(4)) {
                 val now = shot["$key/$role/$date/page"]!!
                 assertTrue("$role moved sideways ${now.left - first.left} px before it had reached its line", Math.abs(now.left - first.left) < 1.5f)
             }

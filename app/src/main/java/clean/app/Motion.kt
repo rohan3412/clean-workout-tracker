@@ -99,6 +99,7 @@ object Motion {
     fun pageContentAlpha(grown: Float): Float = ((grown - CARD_FADE_SHARE) / (PAGE_IN_BY - CARD_FADE_SHARE)).coerceIn(0f, 1f)
     const val PAGE_IN_BY = 0.8f
     /** What is on both the card and the page but not alike (a title, a number, a chart) crosses over while it travels. */
+    // Fades only (nothing that moves has a window of its own): the cross-fade of what is on both sides, and a row going below the page.
     fun morphIn(): TweenSpec<Float> = tween(CARD_TO_PAGE / 2, delayMillis = CARD_TO_PAGE / 4, easing = Emphasized)
     fun morphOut(): TweenSpec<Float> = tween(CARD_TO_PAGE / 2, delayMillis = CARD_TO_PAGE / 4, easing = Emphasized)
     /**
@@ -117,19 +118,28 @@ object Motion {
     fun rowIn(): TweenSpec<Float> = tween(CARD_TO_PAGE * 2 / 5, delayMillis = CARD_TO_PAGE / 10, easing = LinearEasing)
     /**
      * The way of a History row's name, date and PR count between the row and its card, so no two of them ever cross: on opening the box first
-     * moves up or down to its line (the first [LEG_SPLIT] of the clock) and only then sideways and in size, on Back sideways first and then
-     * to the row's line. The name keeps its width until the PR count has moved off, so its box never runs into it.
+     * moves up or down to its line (the first [LEG_SPLIT] of its way) and only then sideways and in size, on Back sideways first and then
+     * to the row's line. The name keeps its width until the PR count has moved off, so its box never runs into it. Both legs run on the container's
+     * clock ([Emphasized]), so every box of every row starts on the first frame and arrives on the last, with the container.
      */
     const val LEG_SPLIT = 0.45f
-    fun legged(initial: androidx.compose.ui.geometry.Rect, target: androidx.compose.ui.geometry.Rect, forward: Boolean): androidx.compose.animation.core.FiniteAnimationSpec<androidx.compose.ui.geometry.Rect> {
+    /**
+     * Where a box on its legs is when the container has gone [p] of its way (0 the start, 1 the end, on [Emphasized]): the two legs are laid end to
+     * end and [p] says how far along them, so the box starts moving on the first frame and arrives on the last, with the container, whatever its legs' lengths.
+     */
+    fun leggedAt(initial: androidx.compose.ui.geometry.Rect, target: androidx.compose.ui.geometry.Rect, forward: Boolean, p: Float): androidx.compose.ui.geometry.Rect {
         val via = if (forward) androidx.compose.ui.geometry.Rect(initial.left, target.top, initial.left + initial.width, target.top + target.height)
             else androidx.compose.ui.geometry.Rect(target.left, initial.top, target.left + target.width, initial.top + initial.height)
-        return androidx.compose.animation.core.keyframes {
-            durationMillis = CARD_TO_PAGE
-            via at (CARD_TO_PAGE * LEG_SPLIT).toInt() using Standard
-            target at CARD_TO_PAGE using Standard
-        }
+        return if (p < LEG_SPLIT) androidx.compose.ui.geometry.lerp(initial, via, p / LEG_SPLIT) else androidx.compose.ui.geometry.lerp(via, target, (p - LEG_SPLIT) / (1f - LEG_SPLIT))
     }
+    /** How many straight steps the legs are sampled in; each is shorter than a frame. */
+    const val LEG_SAMPLES = 50
+    fun legged(initial: androidx.compose.ui.geometry.Rect, target: androidx.compose.ui.geometry.Rect, forward: Boolean): androidx.compose.animation.core.FiniteAnimationSpec<androidx.compose.ui.geometry.Rect> =
+        androidx.compose.animation.core.keyframes {
+            durationMillis = CARD_TO_PAGE
+            // The legs on the container's own clock: the box is where [leggedAt] puts it for the eased progress at each step of the time.
+            for (i in 1 until LEG_SAMPLES) leggedAt(initial, target, forward, Emphasized.transform(i / LEG_SAMPLES.toFloat())) at (CARD_TO_PAGE * i / LEG_SAMPLES)
+        }
     /** The tabs page stays under the growing container until it is done (opening), and is there from the first frame going back. */
     fun <T> tabsHold(forward: Boolean): TweenSpec<T> = if (forward) tween(1, delayMillis = CARD_TO_PAGE) else tween(1)
 
