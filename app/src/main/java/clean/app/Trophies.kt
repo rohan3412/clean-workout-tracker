@@ -1,6 +1,5 @@
 package clean.app
 
-import clean.app.ui.theme.numbers
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.background
@@ -62,7 +61,7 @@ fun TrophiesScreen(model: AppModel) {
         LazyColumn(Modifier.padding(padding).fillMaxSize()) {
             val c = loaded
             if (c == null) {
-                item { Section("") { Text("Working it out…", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+                item { PageSection("") { Text("Working it out…", color = MaterialTheme.colorScheme.onSurfaceVariant) } }
                 return@LazyColumn
             }
             val streak = c.streak
@@ -71,14 +70,14 @@ fun TrophiesScreen(model: AppModel) {
             // With a program the streak that leads is the program's, and the weekly target's goes second.
             val lead = program?.streak ?: streak
             item {
-                Section("Streak", Modifier.settleIn(0)) {
+                PageSection("Streak", Modifier.settleIn(0)) {
                     MorphText(
                         androidx.compose.ui.text.AnnotatedString(if (program != null) spanText(lead.length) else plural(lead.length, "week") + if (lead.length >= 4) " · about ${plural(approxMonths(lead.length), "month")}" else ""),
-                        "number", onPage = true, style = MaterialTheme.typography.headlineMedium.numbers(), fontWeight = FontWeight.SemiBold,
+                        "number", onPage = true, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold,
                     )
                     if (program != null) Text("on program · ${plural(lead.length, "week")}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        Icon(CleanIcons.Shield, null, Modifier.size(18.dp), tint = if (lead.shield) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(CleanIcons.ShieldLine, null, Modifier.size(18.dp), tint = if (lead.shield) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
                             if (lead.shield) "Shield ready: one missed week will be forgiven" else "Next shield in ${plural(lead.weeksToShield, "week")}",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -97,7 +96,7 @@ fun TrophiesScreen(model: AppModel) {
                 }
             }
             if (program != null) item {
-                Section("This week on program", Modifier.settleIn(1)) {
+                PageSection("This week on program", Modifier.settleIn(1)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.xs)) {
                         for (slot in program.now?.slots.orEmpty()) {
                             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
@@ -118,7 +117,7 @@ fun TrophiesScreen(model: AppModel) {
                 }
             }
             item {
-                Section("Last $CELLS weeks", Modifier.settleIn(2)) {
+                PageSection("Last $CELLS weeks", Modifier.settleIn(2)) {
                     val byMonday = if (program != null) {
                         program.weeks.withIndex().associate { (i, week) ->
                             val training = week.slots.filter { it.day != null }
@@ -140,7 +139,7 @@ fun TrophiesScreen(model: AppModel) {
                 }
             }
             item {
-                Section("Badges", Modifier.settleIn(3)) {
+                PageSection("Badges", Modifier.settleIn(3)) {
                     val awards = c.awards + program?.awards.orEmpty()
                     val earned = awards.filter { it.earned != null }.sortedByDescending { it.earned }
                     if (earned.isEmpty()) Text("None yet. A month of weeks that meet the target earns the first, and so do ten workouts.", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -171,7 +170,7 @@ fun TrophiesScreen(model: AppModel) {
                 }
             }
             item {
-                Section("Habits", Modifier.settleIn(4)) {
+                PageSection("Habits", Modifier.settleIn(4)) {
                     LabelValue("Weeks trained in a row", c.weeksTrained.toString()) { model.open(Screen.Calendar()) }
                     c.longestBreak?.let { gap ->
                         LabelValue("Longest break", plural(gap.days, "day")) { model.open(Screen.WorkoutDetail(gap.to)) }
@@ -238,7 +237,7 @@ private fun WeekCell(cell: Cell?, week: String, modifier: Modifier, onClick: () 
     Box(box.clickable(onClick = onClick).semantics { contentDescription = "Week of $week: $state" }.padding(Space.xs), contentAlignment = Alignment.Center) {
         when {
             cell.met -> Icon(CleanIcons.Star, null, Modifier.fillMaxSize(), tint = accent)
-            cell.state == WeekState.FORGIVEN -> Icon(CleanIcons.Shield, null, Modifier.fillMaxSize(), tint = muted)
+            cell.state == WeekState.FORGIVEN -> Icon(CleanIcons.ShieldLine, null, Modifier.fillMaxSize(), tint = muted)
             else -> ProgressRing(cell.fraction, Modifier.fillMaxSize(), if (current) accent else muted.copy(alpha = 0.7f), 2.5.dp)
         }
     }

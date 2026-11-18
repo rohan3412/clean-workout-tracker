@@ -40,13 +40,5 @@
             android:ellipsize="end"
             android:maxLines="2"
             android:textAppearance="@android:style/TextAppearance.Material.Notification" />
-
-        <ImageButton
-            android:id="@+id/notif_toggle"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="@null"
-            android:scaleType="center"
-            android:src="@drawable/ic_notif_less" />
     </LinearLayout>
 </LinearLayout>

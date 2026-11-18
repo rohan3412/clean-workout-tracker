@@ -1,6 +1,5 @@
 package clean.app
 
-import clean.app.ui.theme.numbers
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -72,7 +71,7 @@ fun BmiScreen(model: AppModel) {
                     else {
                         val band = bands.last { latest.second >= it.first }
                         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                            Text(one(latest.second), style = MaterialTheme.typography.displaySmall.numbers())
+                            Text(one(latest.second), style = MaterialTheme.typography.displaySmall)
                             Text(band.second, Modifier.padding(bottom = Space.s), color = band.third)
                         }
                         LabelValue("From", prettyDay(latest.first)) { model.open(Screen.MeasurementDetail("weight.csv")) }

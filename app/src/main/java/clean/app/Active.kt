@@ -2,7 +2,6 @@ package clean.app
 
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.runtime.mutableStateListOf
-import clean.app.ui.theme.numbers
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.indication
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -60,6 +59,8 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.composed
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onSizeChanged
+import dev.chrisbanes.haze.hazeSource
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -157,6 +158,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -199,19 +203,18 @@ import clean.core.sidePairs
 import clean.core.startsSidesRest
 import clean.core.shortNumber
 
-/** The buzz under a set just ticked (kv `feedback.tick`): none, a light tick, or a short vibration. */
+/** The tab an exercise opens on when it is reached from a workout in progress: History. */
+const val WORKOUT_EXERCISE_TAB = 1
+
+/** The buzz under a set just ticked: a light tick, none with Animations off. */
 internal fun tickBuzz(haptic: androidx.compose.ui.hapticfeedback.HapticFeedback, level: String) {
-    when (level) {
-        "off" -> {}
-        "strong" -> Feedback.pulse(40)
-        else -> haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-    }
+    if (level != "off") haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
 }
 
 /**
- * A set row (or a round) with the swipes of Settings, Workout, Layout (kv `swipe.right`, `swipe.left`: finish, delete or off).
+ * A set row (or a round) with the swipes: right finishes, left removes.
  * Finishing is the box's own tick, so hints are accepted and the rest starts as for a tap; on a set already done the
- * same swipe un-ticks it, like the checkbox. The buzz at the threshold is the tick's (`feedback.tick`).
+ * same swipe un-ticks it, like the checkbox. The buzz at the threshold is the tick's.
  */
 @Composable
 private fun SetSwipe(done: Boolean, onTick: () -> Unit, onRemove: () -> Unit, content: @Composable () -> Unit) {
@@ -225,7 +228,7 @@ private fun SetSwipe(done: Boolean, onTick: () -> Unit, onRemove: () -> Unit, co
     SwipeRow(left = action(feel.swipeLeft), right = action(feel.swipeRight), buzz = { tickBuzz(it, feel.tick) }, content = content)
 }
 
-/** Whether a swipe set to [kind] in Settings, Workout, Layout removes an exercise when made on its name: only "delete" does. */
+/** Whether a swipe set to [kind] removes an exercise when made on its name: only "delete" does. */
 internal fun removesExercise(kind: String) = kind == "delete"
 
 /** [content] in a [SwipeRow], which takes no sideways drag while it has no swipe to make (focus mode, or both swipes off). */
@@ -234,9 +237,6 @@ private fun OptionalSwipe(left: SwipeAction?, right: SwipeAction?, content: @Com
     val tick = LocalFeel.current.tick
     SwipeRow(left = left, right = right, buzz = { tickBuzz(it, tick) }, content = content)
 }
-
-/** Set rows without the Previous column (kv `workout.rows` = compact; Settings, Workout, Layout). */
-private val LocalDense = staticCompositionLocalOf { false }
 
 /**
  * What focus mode shows of the set to do next in a card, and what its Done button does: the same tick the row's own box does.
@@ -353,10 +353,8 @@ fun ActiveScreen(model: AppModel) {
     val offerUndo = { what: String, restore: () -> Unit -> model.say(what) { restore() } }
     // After a set is ticked the card with the next one comes into view.
     val stored by model.options.collectAsState()
-    // Layout (Settings, Workout): one exercise at a time or the whole list, set rows with or without last time, content low on the screen.
+    // Layout: one exercise at a time (the All / Focus switch in the top bar) or the whole list.
     val focus = (stored["workout.focus"] ?: "off") == "on"
-    val oneHand = stored["workout.oneHand"] == "on"
-    val dense = stored["workout.rows"] == "compact"
     val list = rememberLazyListState()
     val moving = LocalMotion.current
     LaunchedEffect(next, focus) { if (!focus && next != null && draft.lastDoneMillis != null) { if (moving) list.animateScrollToItem(next + 1) else list.scrollToItem(next + 1) } }
@@ -400,7 +398,7 @@ fun ActiveScreen(model: AppModel) {
                     RestChoice("Set the time left", null, emptyList(), { model.startRest(it, changing = true) }, custom = "Set…")
                     // Start the rest again at a usual length.
                     Text("Rest again for", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    RestPresets(parseRestPresets(stored["rest.presets"]), { model.startRest(it) })
+                    RestPresets(parseRestPresets(null), { model.startRest(it) })
                     Text("How long the rest is to begin with is set per exercise (Rest timer, in its options) and for all exercises in Settings, which also holds these lengths.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
@@ -536,11 +534,13 @@ fun ActiveScreen(model: AppModel) {
 
     val summary = model.flag("workout.summary")
     fun finish() {
+        val name = model.draft?.name ?: "Workout"
         val saved = model.finishWorkout()
         if (saved != null) {
             model.back()
             // What the workout came to, or just a word that it is saved.
-            if (summary) model.open(Screen.Summary(saved)) else model.message = "Workout saved"
+            if (summary) model.open(Screen.Summary(saved))
+            model.saidSaved(name, saved)
         } else {
             confirm = "discard"
         }
@@ -575,15 +575,32 @@ fun ActiveScreen(model: AppModel) {
         model.putDraft(after)
     }
 
-    val feel = Feel(stored["feedback.tick"] ?: "light", stored["pr.celebrate"] ?: "none", stored["swipe.right"] ?: "finish", stored["swipe.left"] ?: "delete")
+    val feel = Feel(if (LocalMotion.current) "light" else "off")
     val rowDialogs = remember { RowDialogs() }
-    CompositionLocalProvider(LocalFeel provides feel, LocalDense provides dense, LocalPad provides pad, LocalRowDialogs provides rowDialogs) {
+    // What floats (the number pad, the rest panel) is glass over the list, which is the blur source and scrolls under the pad.
+    val haze = dev.chrisbanes.haze.rememberHazeState()
+    val padDp = with(LocalDensity.current) { pad.height.toDp() }
+    // A keyboard plugged into the phone types into the box the pad is on (C4): digits, point, Backspace; Enter is Next.
+    val keyFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(pad.target != null) { if (pad.target != null) runCatching { keyFocus.requestFocus() } }
+    CompositionLocalProvider(LocalFeel provides feel, LocalPad provides pad, LocalRowDialogs provides rowDialogs, LocalHaze provides haze) {
     Box(Modifier.fillMaxSize()) {
     Scaffold(
-        modifier = Modifier.closePadOnTap(pad).imePadding(), containerColor = pageContainer(),
+        modifier = Modifier.closePadOnTap(pad).imePadding().focusRequester(keyFocus).focusable().onPreviewKeyEvent { e ->
+            if (pad.target == null || e.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) false
+            else {
+                val code = e.nativeKeyEvent.keyCode
+                val key = padKeyOf(code)
+                when {
+                    key != null -> { padActions.key(key); true }
+                    code == android.view.KeyEvent.KEYCODE_ENTER || code == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> { padActions.next(); true }
+                    else -> false
+                }
+            }
+        }, containerColor = pageContainer(),
         topBar = {
             val now = nowMillis()
-            Column(Modifier.sheetBelow().statusBarsPadding()) {
+            Column(Modifier.statusBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = Space.xs), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = model::back) { Icon(CleanIcons.ChevronDown, "Minimise workout") }
                 // For the first five minutes cancelling is at hand up here, for a workout started by mistake; after that it is at the bottom.
@@ -592,7 +609,7 @@ fun ActiveScreen(model: AppModel) {
                 // The rest in progress; a tap on it gives the ways to change it.
                 if (rest != null) Text(
                     "Rest ${clock(rest)}", Modifier.weight(1f).clickable { restOptions = true }.minTouch().wrapContentHeight(Alignment.CenterVertically),
-                    textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyLarge.numbers(), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
                 )
                 else Text(
                     draft.lastDoneMillis?.let { "Since last set  ${clock((now - it) / 1000)}" } ?: "",
@@ -620,27 +637,14 @@ fun ActiveScreen(model: AppModel) {
             }
             }
         },
-        bottomBar = {
-            Column {
-            AnimatedVisibility(pad.target != null, enter = Motion.appear(LocalMotion.current), exit = Motion.vanish(LocalMotion.current)) {
-                val rpeOn = model.flag("workout.rpe")
-                val rpeNow = pad.target?.let { t -> (draft.blocks.getOrNull(keys.indexOf(t.card))?.items?.getOrNull(t.item) as? DraftSet)?.rpe }.orEmpty()
-                Box(Modifier.onGloballyPositioned { pad.bounds = it.boundsInWindow() }) {
-                    Keypad(pad.meta, if (rpeOn) rpeNow else null, padActions::key, { value -> padActions.set { it.copy(rpe = value) } }, padActions::next, onHide = pad::close)
-                }
-            }
-            }
-        },
     ) { padding ->
         RestDisplay(model, draft, { restOptions = true }, Modifier.padding(padding)) {
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-        // One-handed: everything starts a third of the way down.
-        val low = if (oneHand) maxHeight / 3 else 0.dp
-        if (focus) FocusPages(
-            model, workouts, draft, keys, pad, next, pager, low, oneHand, offerUndo,
+        BoxWithConstraints(Modifier.fillMaxSize().hazeSource(haze)) {
+        if (focus) Box(Modifier.fillMaxSize().padding(bottom = padDp)) { FocusPages(
+            model, workouts, draft, keys, pad, next, pager, offerUndo,
             { i, b, changed -> blockChanged(i, b, changed) }, { picking = true }, if (early) null else ({ confirm = "cancel" }),
-        )
-        else LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = low + with(density) { roomTop.toDp() }, bottom = with(density) { roomBottom.toDp() })) {
+        ) }
+        else LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = with(density) { roomTop.toDp() }, bottom = with(density) { roomBottom.toDp() } + padDp)) {
             item { WorkoutTitle(model, draft) }
             itemsIndexed(draft.blocks, key = { i, _ -> keys[i] }) { index, block ->
                 // Kept between redraws while nothing about it changes, so a key press redraws only the card it changed.
@@ -688,6 +692,15 @@ fun ActiveScreen(model: AppModel) {
         }
         }
     }
+    // The number pad floats over the bottom of the list (glass over the blur of the rows scrolling under it).
+    AnimatedVisibility(pad.target != null, Modifier.align(Alignment.BottomCenter).imePadding(), enter = Motion.appear(LocalMotion.current), exit = Motion.vanish(LocalMotion.current)) {
+        val rpeOn = model.flag("workout.rpe")
+        val rpeNow = pad.target?.let { t -> (draft.blocks.getOrNull(keys.indexOf(t.card))?.items?.getOrNull(t.item) as? DraftSet)?.rpe }.orEmpty()
+        DisposableEffect(pad) { onDispose { pad.height = 0 } }
+        Box(Modifier.onGloballyPositioned { pad.bounds = it.boundsInWindow() }.onSizeChanged { pad.height = it.height }) {
+            Keypad(pad.meta, if (rpeOn) rpeNow else null, padActions::key, { value -> padActions.set { it.copy(rpe = value) } }, padActions::next, onHide = pad::close)
+        }
+    }
     RowDialogHost(rowDialogs)
     }
     }
@@ -698,7 +711,19 @@ fun ActiveScreen(model: AppModel) {
     )
     when (val c = confirm) {
         null -> {}
-        "cancel", "discard" -> Confirm(
+        "cancel" -> if (draft.blocks.any { b -> b.items.any { it is DraftSet && it.done } }) CleanDialog(
+            onDismissRequest = { confirm = null },
+            title = { Text("Cancel workout?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                    Text("The sets you ticked and everything entered in this workout are thrown away.")
+                    SlideToConfirm("Slide to discard", "Discard workout", { confirm = null; model.cancelWorkout() }, Modifier.fillMaxWidth())
+                    TextButton(onClick = { confirm = null }, modifier = Modifier.fillMaxWidth()) { Text("Keep it") }
+                }
+            },
+            confirmButton = {},
+        ) else Confirm("Cancel workout?", "Everything entered in this workout is thrown away.", "Discard", { model.cancelWorkout() }) { confirm = null }
+        "discard" -> Confirm(
             if (c == "cancel") "Cancel workout?" else "Nothing to save",
             if (c == "cancel") "Everything entered in this workout is thrown away." else "No set is ticked, so there is nothing to save. Discard this workout?",
             "Discard",
@@ -764,18 +789,17 @@ private fun WorkoutTitle(model: AppModel, draft: Draft) {
 @Composable
 private fun FocusPages(
     model: AppModel, workouts: List<Workout>, draft: Draft, keys: List<String>, pad: Pad, next: Int?, pager: PagerState,
-    top: Dp, oneHand: Boolean, onUndo: (String, () -> Unit) -> Unit, onChange: (Int, DraftBlock, DraftBlock?) -> Unit,
+    onUndo: (String, () -> Unit) -> Unit, onChange: (Int, DraftBlock, DraftBlock?) -> Unit,
     onAdd: () -> Unit, onCancel: (() -> Unit)?,
 ) {
     Column(Modifier.fillMaxSize()) {
-        Spacer(Modifier.height(top))
         WorkoutTitle(model, draft)
         HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), key = { keys.getOrNull(it) ?: "end" }) { page ->
             val block = draft.blocks.getOrNull(page)
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                 if (block != null) {
                     val slot = remember { FocusSlot() }
-                    FocusHeader(model, block, slot.info, page + 1, draft.blocks.size, oneHand)
+                    FocusHeader(model, block, slot.info, page + 1, draft.blocks.size)
                     val last = draft.blocks.lastIndex
                     val isNext = next == page
                     val reorder = remember(page, last, isNext) {
@@ -798,12 +822,12 @@ private fun FocusPages(
 
 /** The top of a focus page: the exercise, which set is next, its weight × reps in large type, last time, and Done. */
 @Composable
-private fun FocusHeader(model: AppModel, block: DraftBlock, info: FocusInfo?, position: Int, count: Int, oneHand: Boolean) {
+private fun FocusHeader(model: AppModel, block: DraftBlock, info: FocusInfo?, position: Int, count: Int) {
     Column(Modifier.fillMaxWidth().padding(horizontal = Space.l, vertical = Space.s), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(Space.xs)) {
         Caption("Exercise $position of $count")
         Text(
             block.exercise,
-            Modifier.clickable { model.open(Screen.ExerciseDetail(block.exercise, tab = model.workoutExerciseTab.value)) }.minTouch().wrapContentHeight(Alignment.CenterVertically).semantics { heading() },
+            Modifier.clickable { model.open(Screen.ExerciseDetail(block.exercise, tab = WORKOUT_EXERCISE_TAB)) }.minTouch().wrapContentHeight(Alignment.CenterVertically).semantics { heading() },
             style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center,
         )
         if (info == null) {
@@ -815,7 +839,7 @@ private fun FocusHeader(model: AppModel, block: DraftBlock, info: FocusInfo?, po
         fun Value(text: String, typed: Boolean, unit: String, reps: Boolean, spoken: String) {
             Row(Modifier.clickable(onClickLabel = "Edit") { info.onEdit(reps) }.minTouch().semantics(mergeDescendants = true) { contentDescription = spoken }, verticalAlignment = Alignment.Bottom) {
                 Text(
-                    text.ifEmpty { NONE }, style = MaterialTheme.typography.displaySmall.numbers(), fontWeight = FontWeight.Bold, maxLines = 1,
+                    text.ifEmpty { NONE }, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold, maxLines = 1,
                     color = if (typed) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                 )
                 if (unit.isNotEmpty()) Text(" $unit", Modifier.padding(bottom = Space.s), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -830,7 +854,7 @@ private fun FocusHeader(model: AppModel, block: DraftBlock, info: FocusInfo?, po
         // The same tick as the row's own box; a taller button when one-handed.
         MainButton(
             "Done", info.onDone,
-            Modifier.fillMaxWidth().padding(top = Space.s).then(if (oneHand) Modifier.height(72.dp) else Modifier.heightIn(min = 56.dp)).semantics { contentDescription = "Done, ${info.spoken}" },
+            Modifier.fillMaxWidth().padding(top = Space.s).heightIn(min = 56.dp).semantics { contentDescription = "Done, ${info.spoken}" },
         )
     }
 }
@@ -924,7 +948,6 @@ private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBloc
     val finished = block.items.any { it is DraftSet } && block.items.all { it !is DraftSet || it.done }
     var unfolded by remember(finished) { mutableStateOf(false) }
     val compact = model.flag("workout.compact")
-    val dense = LocalDense.current
     val focusManager = LocalFocusManager.current
     // The set to do next, when it is in this card.
     val nextItem = if (reorder.next) block.items.indexOfFirst { it is DraftSet && !it.done } else -1
@@ -1045,7 +1068,7 @@ private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBloc
                         reorderNow.drag(amount.y)
                     }
                 // No ripple while the cards are folded for reordering: the press that picked the card up would stay drawn behind the name, and its release is not a tap.
-                }.clickable(nameSource, if (reorder.collapsed) null else LocalIndication.current) { if (!reorderNow.collapsed) model.open(Screen.ExerciseDetail(block.exercise, tab = model.workoutExerciseTab.value)) },
+                }.clickable(nameSource, if (reorder.collapsed) null else LocalIndication.current) { if (!reorderNow.collapsed) model.open(Screen.ExerciseDetail(block.exercise, tab = WORKOUT_EXERCISE_TAB)) },
                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -1077,7 +1100,7 @@ private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBloc
                 onUndo(if (was) "Left and right off" else "Left and right on") { model.setSides(block.exercise, was); owner.put(before) }
             }
             // Correcting a finished workout has no rest to time.
-            if (!correcting) SheetRow("Rest timer", CleanIcons.Timer, value = restLabel(model.restFor(block.exercise))) { menu = false; resting = true }
+            if (!correcting) SheetRow("Rest timer", CleanIcons.TimerLine, value = restLabel(model.restFor(block.exercise))) { menu = false; resting = true }
             SheetGap()
             SheetRow("Switch variation", CleanIcons.Swap) { menu = false; switching = true }
             SheetRow("Replace exercise", CleanIcons.Refresh) { menu = false; replacing = true }
@@ -1161,7 +1184,7 @@ private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBloc
             }
             if (sticky.isNotEmpty()) {
                 // A name from the list, or a colour of the user's own; the text turns dark on a light band.
-                val band = stickyBand(stickyColor, LocalLook.current.dark).inLook()
+                val band = stickyBand(stickyColor, LocalLook.current.dark)
                 Text(
                     sticky, fontWeight = FontWeight.Bold, color = band.readableOn(),
                     modifier = Modifier.padding(horizontal = Space.m, vertical = Space.xs).fillMaxWidth().clip(cardShape()).background(band).clickable { editingSticky = true }.padding(horizontal = Space.l, vertical = Space.s),
@@ -1192,9 +1215,9 @@ private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBloc
                         }
                     }
                 } else {
-                    if (!dense) Caption("Previous", Modifier.weight(1f), TextAlign.Center)
-                    Caption(if (cardio) "km" else unit, if (dense) Modifier.weight(1f) else Modifier.width(84.dp), TextAlign.Center)
-                    Caption(if (cardio) "min" else if (timed) "sec" else "reps", if (dense) Modifier.weight(1f) else Modifier.width(84.dp), TextAlign.Center)
+                    Caption("Previous", Modifier.weight(1f), TextAlign.Center)
+                    Caption(if (cardio) "km" else unit, Modifier.width(84.dp), TextAlign.Center)
+                    Caption(if (cardio) "min" else if (timed) "sec" else "reps", Modifier.width(84.dp), TextAlign.Center)
                     Box(Modifier.width(44.dp), contentAlignment = Alignment.Center) { Icon(CleanIcons.Check, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
             }
@@ -1216,11 +1239,10 @@ private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBloc
             // A set ticked now that earns a new estimated 1RM gets a chime and two taps, once (once per round when either half does);
             // those that had already earned one when the card appeared are not celebrated again.
             val celebrated = remember { live.filterValues { PrKind.ONE_RM in it }.keys.map { leftOf[it] ?: it }.toMutableSet() }
-            val moment = model.flag("pr.moment")
             val motion = LocalMotion.current
             LaunchedEffect(live) {
                 val fresh = live.filterValues { PrKind.ONE_RM in it }.keys.map { leftOf[it] ?: it }.toSet().filter { celebrated.add(it) }
-                if (fresh.isNotEmpty() && moment && motion) {
+                if (fresh.isNotEmpty() && motion) {
                     Feedback.doubleTick()
                     Feedback.chime()
                 }
@@ -1602,7 +1624,7 @@ private fun BlockCard(model: AppModel, workouts: List<Workout>, block: DraftBloc
             val elapsed = ((nowMillis() - begun) / 1000).coerceAtLeast(0)
             Text(
                 if (down && last != null) (if (elapsed < last) clock(last - elapsed) else "+" + clock(elapsed - last)) else clock(elapsed),
-                Modifier.fillMaxWidth().padding(vertical = Space.l), textAlign = TextAlign.Center, style = MaterialTheme.typography.displayLarge.numbers(), fontWeight = FontWeight.Bold,
+                Modifier.fillMaxWidth().padding(vertical = Space.l), textAlign = TextAlign.Center, style = MaterialTheme.typography.displayLarge, fontWeight = FontWeight.Bold,
             )
             if (last != null) Column(Modifier.padding(horizontal = Space.l)) {
                 Choice(listOf(false, true), down, { if (it) "Count down from last time" else "Count up" }) { down = it; model.startStopwatch(if (it) last else null) }
@@ -1775,7 +1797,6 @@ private fun SetRow(
     val pop = remember { Animatable(1f) }
     var was by remember { mutableStateOf(set.done) }
     val haptic = LocalHapticFeedback.current
-    val dense = LocalDense.current
     val feel = LocalFeel.current
     LaunchedEffect(set.done) {
         if (set.done && !was) {
@@ -1818,7 +1839,7 @@ private fun SetRow(
     SetSwipe(set.done, onTick, { removeRow(true) }) {
     Column {
     Row(
-        Modifier.padding(horizontal = Space.xs).prCelebration(PrKind.ONE_RM in record).then(bounds).onGloballyPositioned { places[0] = it }.doneTint(set.done, skin.rowDone).padding(start = Space.xs, end = Space.s, top = if (dense) 1.dp else Space.xs, bottom = if (dense) 1.dp else Space.xs),
+        Modifier.padding(horizontal = Space.xs).then(bounds).onGloballyPositioned { places[0] = it }.doneTint(set.done, skin.rowDone).padding(start = Space.xs, end = Space.s, top = Space.xs, bottom = Space.xs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // The set's number or letter; tapping it changes the type or removes the set.
@@ -1833,22 +1854,18 @@ private fun SetRow(
                 Text(label, color = typeColor(set.type), fontWeight = FontWeight.Bold)
                 if (set.rpe.isNotEmpty()) Text("@${set.rpe}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            DropdownMenu(menu, { menu = false }) { typeItems { menu = false } }
+            CleanMenu(menu, { menu = false }) { typeItems { menu = false } }
         }
-        if (!dense) Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(previous, Modifier.clickable(enabled = onPrevious != null) { onPrevious?.invoke() }, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = if (aimed) 2 else 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold)
                 if (onTimer != null) Box(Modifier.minTouch().clickable(onClick = onTimer), contentAlignment = Alignment.Center) {
-                    Icon(CleanIcons.Timer, "Time this set", tint = if (timerRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(CleanIcons.TimerLine, "Time this set", tint = if (timerRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             AnimatedVisibility(record.isNotEmpty(), enter = Motion.appear(motion), exit = Motion.vanish(motion)) {
                 PrBadges(record, Modifier.clickable(onClick = onRecord), landing = landing)
             }
-        }
-        // Compact rows have no Previous column to hold the timer, so it sits before the boxes.
-        else if (onTimer != null) Box(Modifier.minTouch().clickable(onClick = onTimer), contentAlignment = Alignment.Center) {
-            Icon(CleanIcons.Timer, "Time this set", tint = if (timerRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
         }
         // What each box holds, in words: its set, which box, the value and its unit.
         val (weightWord, repsWord) = when (loadType) {
@@ -1858,8 +1875,8 @@ private fun SetRow(
         }
         val weightUnit = if (loadType == LoadType.CARDIO) "kilometres" else if (unit == "lb") "pounds" else "kilograms"
         val repsUnit = if (loadType == LoadType.CARDIO) "minutes" else if (loadType == LoadType.TIMED) "seconds" else "reps"
-        PadField(set.weight, hintWeight, focus == 1, (if (dense) Modifier.weight(1f) else Modifier.width(84.dp)).padding(horizontal = Space.xs), "$spoken $weightWord, ${if (set.weight.isEmpty()) "empty" else "${set.weight} $weightUnit"}") { onFocus(false) }
-        PadField(set.reps, hintReps, focus == 2, (if (dense) Modifier.weight(1f) else Modifier.width(84.dp)).padding(horizontal = Space.xs), "$spoken $repsWord, ${if (set.reps.isEmpty()) "empty" else "${set.reps} $repsUnit"}") { onFocus(true) }
+        PadField(set.weight, hintWeight, focus == 1, Modifier.width(84.dp).padding(horizontal = Space.xs), "$spoken $weightWord, ${if (set.weight.isEmpty()) "empty" else "${set.weight} $weightUnit"}") { onFocus(false) }
+        PadField(set.reps, hintReps, focus == 2, Modifier.width(84.dp).padding(horizontal = Space.xs), "$spoken $repsWord, ${if (set.reps.isEmpty()) "empty" else "${set.reps} $repsUnit"}") { onFocus(true) }
         // The whole cell is the checkbox; the press ripple stays on the box drawn in it. Correcting a finished workout has no ticks:
         // the place stays, empty, so the boxes line up as in a workout.
         val tickSource = remember { MutableInteractionSource() }
@@ -1881,10 +1898,6 @@ private fun SetRow(
                 }
             }
         }
-    }
-    // Without the Previous column the badges sit on a line of their own under the row.
-    if (dense) AnimatedVisibility(record.isNotEmpty(), enter = Motion.appear(motion), exit = Motion.vanish(motion)) {
-        PrBadges(record, Modifier.padding(start = 56.dp, end = Space.m, bottom = Space.xxs).clickable(onClick = onRecord), landing = landing)
     }
     }
     }
@@ -2093,7 +2106,6 @@ private fun RowDialogHost(host: RowDialogs) {
     }
     BackHandler(host.open) { host.close() }
     val scheme = MaterialTheme.colorScheme
-    val mono = LocalLook.current.mono
     var origin by remember { mutableStateOf(Offset.Zero) }
     val cardRect = remember { arrayOf(Rect.Zero) }
     Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInWindow() }) {
@@ -2152,7 +2164,6 @@ private fun RowDialogHost(host: RowDialogs) {
                 Modifier.clickable(remember { MutableInteractionSource() }, null) { }
                     .semantics { paneTitle = dialog.title },
                 shape = clean.app.ui.theme.SheetShape, color = scheme.surfaceContainerHigh,
-                border = if (mono) BorderStroke(1.dp, scheme.onSurface) else null,
             ) {
                 Column(Modifier.graphicsLayer { alpha = ((p.value - 0.2f) / 0.5f).coerceIn(0f, 1f) }.verticalScroll(rememberScrollState()).padding(vertical = Space.l)) {
                     Text(dialog.title, Modifier.padding(horizontal = Space.xl, vertical = Space.s).semantics { heading() }, style = MaterialTheme.typography.titleLarge)
@@ -2211,7 +2222,6 @@ private fun PairRow(
     // The side whose own kind is being changed, if any.
     var sideType by remember { mutableStateOf<Side?>(null) }
     val colors = LocalCleanColors.current
-    val dense = LocalDense.current
     val motion = LocalMotion.current
     val gap = rememberRowGap(arrival, items)
     val landing = rememberLanding(records.mapTo(HashSet()) { it.first })
@@ -2250,7 +2260,7 @@ private fun PairRow(
     Box(Modifier.gapped(gap)) {
     SetSwipe(swipeHalf.set.done, swipeHalf.onTick, { removeRow(true) }) {
       Column {
-        Row(Modifier.padding(horizontal = Space.xs).prCelebration(records.any { it.first == PrKind.ONE_RM }).onGloballyPositioned { places[0] = it }.padding(start = Space.xs, end = Space.s, top = if (dense) 1.dp else Space.xs, bottom = if (dense) 1.dp else Space.xs), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.padding(horizontal = Space.xs).onGloballyPositioned { places[0] = it }.padding(start = Space.xs, end = Space.s, top = Space.xs, bottom = Space.xs), verticalAlignment = Alignment.CenterVertically) {
             val typeWords = type?.let { typeName(it).lowercase() } ?: "left ${typeName(left.set.type).lowercase()}, right ${right?.set?.type?.let(::typeName)?.lowercase()}"
             Box(
                 Modifier.width(44.dp).requiredSizeIn(minWidth = 48.dp, minHeight = 48.dp).onGloballyPositioned { places[1] = it }
@@ -2262,7 +2272,7 @@ private fun PairRow(
                     Text(label, color = type?.let { typeColor(it) } ?: Color.Unspecified, fontWeight = FontWeight.Bold)
                     if (rpe.isNotEmpty()) Text("@$rpe", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                DropdownMenu(menu, { menu = false }) { typeItems { menu = false } }
+                CleanMenu(menu, { menu = false }) { typeItems { menu = false } }
             }
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(SIDES_GAP)) {
                 SideHalf(left, unit, loadType, Modifier.weight(1f)) { askSide(Side.LEFT) }
@@ -2305,7 +2315,6 @@ private fun SideTypeChoices(half: Half, onPick: (SetType) -> Unit) {
  */
 @Composable
 private fun SideHalf(h: Half, unit: String, loadType: LoadType, modifier: Modifier, onChangeType: () -> Unit) {
-    val dense = LocalDense.current
     val motion = LocalMotion.current
     val pop = remember { Animatable(1f) }
     var was by remember { mutableStateOf(h.set.done) }
@@ -2339,7 +2348,7 @@ private fun SideHalf(h: Half, unit: String, loadType: LoadType, modifier: Modifi
     Column(
         modifier.background(tint, SmallShape).then(h.bounds).doneTint(h.set.done, skin.rowDone)
             .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onLongClickLabel = "Change type", onLongClick = onChangeType, onClick = {})
-            .padding(horizontal = Space.xs, vertical = if (dense) 1.dp else Space.xs),
+            .padding(horizontal = Space.xs, vertical = Space.xs),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PadField(h.set.weight, h.hintWeight, h.focus == 1, Modifier.weight(1.2f).padding(end = Space.xxs), "${h.spoken} $weightWord, ${if (h.set.weight.isEmpty()) "empty" else "${h.set.weight} $weightUnit"}") { h.onFocus(false) }
@@ -2365,8 +2374,7 @@ private fun SideHalf(h: Half, unit: String, loadType: LoadType, modifier: Modifi
                 }
             }
         }
-        // Compact rows leave out last time's set under the boxes, keeping the side mark only when the halves differ in kind.
-        if (!dense || h.mixed) Row(Modifier.fillMaxWidth().padding(horizontal = Space.xs), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = Space.xs), verticalAlignment = Alignment.CenterVertically) {
             // The side letter is also this half's own kind control: it adds the kind's letter when the round's halves differ, and a tap changes it.
             // A small slot in the line; the 48 dp hit area is centred on it and overlaps the air around, so the row keeps its height.
             Box(Modifier.size(width = 24.dp, height = 16.dp), contentAlignment = Alignment.Center) {
@@ -2381,7 +2389,7 @@ private fun SideHalf(h: Half, unit: String, loadType: LoadType, modifier: Modifi
                     }
                 }
             }
-            if (!dense) Text(
+            Text(
                 h.previous ?: NONE, Modifier.padding(start = Space.s).clickable(enabled = h.onPrevious != null) { h.onPrevious?.invoke() },
                 maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -2404,6 +2412,8 @@ private class Pad {
 
     /** Where the pad itself is drawn and where each weight or reps box is, in the window; a tap anywhere else closes the pad. */
     var bounds: Rect? = null
+    /** The pad's height in px while it is up (zero otherwise): the list leaves this much room at its end, so it scrolls under the pad. */
+    var height by mutableStateOf(0)
     val fields = HashMap<Any, Rect>()
 
     /** The one way the pad goes away: no box is left in edit mode. What was typed stays in the box. */
@@ -2457,21 +2467,27 @@ private fun Modifier.closePadOnTap(pad: Pad): Modifier = composed {
 private fun PadField(value: String, placeholder: String, focused: Boolean, modifier: Modifier, description: String, onClick: () -> Unit) {
     // Once the pad is up (it takes its place at once), the box being typed into is brought back above it.
     val requester = remember { BringIntoViewRequester() }
+    var size by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    val padFor = LocalPad.current
     LaunchedEffect(focused) {
-        if (focused) requester.bringIntoView()
+        if (focused) {
+            // Once the pad has its height (the frame after it appears), the box is brought clear of the whole pad, which floats over the list.
+            androidx.compose.runtime.withFrameNanos { }
+            requester.bringIntoView(Rect(0f, 0f, size.width.toFloat(), size.height + (padFor?.height ?: 0).toFloat()))
+        }
     }
     val skin = workoutSkin()
     val pad = LocalPad.current
     val me = remember { Any() }
     if (pad != null) DisposableEffect(pad) { onDispose { pad.fields.remove(me) } }
     Box(
-        modifier.onGloballyPositioned { if (pad != null) pad.fields[me] = it.boundsInWindow() }.bringIntoViewRequester(requester).clip(SmallShape).background(skin.boxFill)
+        modifier.onSizeChanged { size = it }.onGloballyPositioned { if (pad != null) pad.fields[me] = it.boundsInWindow() }.bringIntoViewRequester(requester).clip(SmallShape).background(skin.boxFill)
             .border(if (focused) skin.focusWidth else skin.lineWidth, if (focused) skin.focusBorder else skin.boxBorder, SmallShape)
             .clickable(onClickLabel = "Edit", onClick = onClick).semantics { contentDescription = description }.padding(vertical = Space.s, horizontal = Space.xs),
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            value.ifEmpty { placeholder }, maxLines = 1, style = MaterialTheme.typography.titleMedium.numbers(), fontWeight = FontWeight.Bold,
+            value.ifEmpty { placeholder }, maxLines = 1, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
             color = if (value.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface,
         )
     }
@@ -2507,7 +2523,8 @@ private fun Keypad(meta: PadMeta, rpe: String?, onKey: (String) -> Unit, onRpe: 
             else Text(label, style = if (side || main) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = if (enabled) front else front.copy(alpha = 0.25f))
         }
     }
-    Surface(color = skin.padFill, shape = SheetTopShape, border = if (skin.padBorder == Color.Transparent) null else BorderStroke(skin.lineWidth, skin.padBorder)) {
+    // Glass over the list that scrolls under it (solid where there is no blur source).
+    Surface(color = Color.Transparent, shape = SheetTopShape, modifier = Modifier.glass(SheetTopShape, LocalHaze.current, lift = 10.dp)) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = Space.s, vertical = Space.s)) {
             val step = shortNumber(meta.step)
             // How hard the set felt: the scale opens above the keys in two rows, and the value chosen is tapped again to clear it.
@@ -2564,7 +2581,7 @@ private val RPE_VALUES = listOf("6", "6.5", "7", "7.5", "8", "8.5", "9", "9.5", 
 @Composable
 fun ExercisePicker(model: AppModel, workouts: List<Workout>, onPick: (String) -> Unit, onDismiss: () -> Unit, onPickMany: ((List<String>) -> Unit)? = null) {
     val settings by model.settings.collectAsState()
-    val hide = model.flag("library.hide")
+    val hide = true
     val all = remember(workouts, settings) { allExercises(workouts, settings.keys) }
     // The muscles the list shows are the user's own where set, as everywhere else.
     val musclesOf = remember(settings) { { name: String -> model.musclesOf(name) } }
@@ -2583,7 +2600,7 @@ fun ExercisePicker(model: AppModel, workouts: List<Workout>, onPick: (String) ->
                 ExerciseList(
                     all, musclesOf, onClick = onPick, onCreate = onPick,
                     leading = { IconButton(onClick = drop) { Icon(CleanIcons.Close, "Close") } },
-                    favourites = settings.filterValues { it.favourite }.keys, hideLibrary = hide,
+                    favourites = settings.filterValues { it.favourite }.keys, hideLibrary = hide, unitOf = model::unitOf,
                     ticked = if (onPickMany != null) ticked else null, onTick = { if (!ticked.remove(it)) ticked.add(it) },
                 )
                 if (onPickMany != null && ticked.isNotEmpty()) MainButton(
@@ -2656,9 +2673,8 @@ fun CorrectScreen(model: AppModel) {
     }
 
     // A swipe that would tick a set does nothing here; one that removes still removes.
-    fun noFinish(kind: String) = if (kind == "finish") "off" else kind
-    val feel = Feel(stored["feedback.tick"] ?: "light", "none", noFinish(stored["swipe.right"] ?: "finish"), noFinish(stored["swipe.left"] ?: "delete"))
-    CompositionLocalProvider(LocalFeel provides feel, LocalDense provides (stored["workout.rows"] == "compact"), LocalDraftSlot provides slot, LocalPad provides pad) {
+    val feel = Feel(if (LocalMotion.current) "light" else "off", swipeRight = "off")
+    CompositionLocalProvider(LocalFeel provides feel, LocalDraftSlot provides slot, LocalPad provides pad) {
         Scaffold(
             modifier = Modifier.closePadOnTap(pad).imePadding(), containerColor = pageContainer(),
             topBar = {
@@ -2736,4 +2752,13 @@ private fun CorrectHeader(model: AppModel, draft: Draft) {
             else Text("The end must be after the start.", Modifier.padding(vertical = Space.xs), style = MaterialTheme.typography.bodySmall, color = LocalCleanColors.current.danger)
         }
     }
+}
+
+/** What a hardware key types into the number pad: a digit, the point (comma too) or Backspace as the pad's own key names; null for any other key. */
+internal fun padKeyOf(code: Int): String? = when (code) {
+    in android.view.KeyEvent.KEYCODE_0..android.view.KeyEvent.KEYCODE_9 -> (code - android.view.KeyEvent.KEYCODE_0).toString()
+    in android.view.KeyEvent.KEYCODE_NUMPAD_0..android.view.KeyEvent.KEYCODE_NUMPAD_9 -> (code - android.view.KeyEvent.KEYCODE_NUMPAD_0).toString()
+    android.view.KeyEvent.KEYCODE_PERIOD, android.view.KeyEvent.KEYCODE_NUMPAD_DOT, android.view.KeyEvent.KEYCODE_COMMA, android.view.KeyEvent.KEYCODE_NUMPAD_COMMA -> "."
+    android.view.KeyEvent.KEYCODE_DEL -> "back"
+    else -> null
 }

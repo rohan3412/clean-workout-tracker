@@ -2,26 +2,15 @@ package clean.core
 
 import java.time.LocalDate
 
-/** The launcher shortcuts on offer (kv `shortcuts`: the chosen ones, in order, joined by commas). */
+/** The launcher shortcuts: all three, always (since 1.1.0 they are no longer chosen). */
 enum class ShortcutKind(val key: String, val label: String) {
     START("start", "Start the next template"),
     RESUME("resume", "Resume workout"),
     WEIGHT("weight", "Log bodyweight"),
 }
 
-val SHORTCUTS_DEFAULT = ShortcutKind.entries.toList()
-
-/** The chosen shortcuts in order; all three when nothing is stored, none for an empty value. Unknown and repeated names are dropped. */
-fun parseShortcuts(stored: String?): List<ShortcutKind> {
-    if (stored == null) return SHORTCUTS_DEFAULT
-    return stored.split(',').mapNotNull { part -> ShortcutKind.entries.firstOrNull { it.key == part.trim() } }.distinct()
-}
-
-/** The stored text for [chosen]: null (key removed) for the default. */
-fun encodeShortcuts(chosen: List<ShortcutKind>): String? = if (chosen == SHORTCUTS_DEFAULT) null else chosen.joinToString(",") { it.key }
-
-/** What the launcher shows: the chosen ones, Resume only while a workout is in progress. */
-fun shortcutsShown(chosen: List<ShortcutKind>, running: Boolean): List<ShortcutKind> = chosen.filter { it != ShortcutKind.RESUME || running }
+/** What the launcher shows: all three, Resume only while a workout is in progress. */
+fun shortcutsShown(running: Boolean): List<ShortcutKind> = ShortcutKind.entries.filter { it != ShortcutKind.RESUME || running }
 
 /** How a day looks in the seven-day strip. */
 enum class DayMark { TRAINED, TODAY, PAST, FUTURE }
@@ -39,9 +28,6 @@ fun weekMarks(today: LocalDate, trained: Set<String>): List<DayMark> {
         }
     }
 }
-
-/** Whether the rest notification is the small form (kv `rest.notif`: `compact`; anything else, and nothing stored, is the expanded one). */
-fun restNotifCompact(stored: String?): Boolean = stored == "compact"
 
 /** The widget's colours as stored (kv `widget.colors`): ARGB integers joined by commas. */
 fun encodeArgb(colours: List<Int>): String = colours.joinToString(",")

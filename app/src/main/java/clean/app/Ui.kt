@@ -9,9 +9,15 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.material3.Surface
-import clean.app.ui.theme.workoutSkin
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.border
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawOutline
+import dev.chrisbanes.haze.hazeEffect
 import androidx.compose.foundation.layout.requiredSizeIn
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.SharedTransitionScope
@@ -39,8 +45,11 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -89,6 +98,13 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
+import clean.app.ui.theme.orange
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.animation.core.snap
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -113,12 +129,11 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import clean.app.ui.theme.buttonShape
+import clean.app.ui.theme.GlassWindowShape
 import clean.app.ui.theme.LocalCleanColors
 import clean.app.ui.theme.SmallShape
 import clean.app.ui.theme.cardShape
 import clean.app.ui.theme.LocalLook
-import clean.app.ui.theme.onInk
-import clean.app.ui.theme.ringTrack
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
@@ -176,10 +191,7 @@ private val BUTTON_PADDING = PaddingValues(horizontal = Space.xl, vertical = Spa
 fun MainButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, summary: String? = null, contentPadding: PaddingValues = BUTTON_PADDING) {
     val source = remember { MutableInteractionSource() }
     val scale by pressScale(source)
-    // Linen's main buttons are in the text colour with the page's colour for words (black and white by day); every other look keeps the accent.
-    val look = LocalLook.current
-    val colors = if (look.inkMainButton) ButtonDefaults.buttonColors(containerColor = look.text, contentColor = look.onInk) else ButtonDefaults.buttonColors()
-    Button(onClick, modifier.graphicsLayer { scaleX = scale; scaleY = scale }, enabled, shape = buttonShape(), colors = colors, contentPadding = contentPadding, interactionSource = source) {
+    Button(onClick, modifier.graphicsLayer { scaleX = scale; scaleY = scale }, enabled, shape = buttonShape(), contentPadding = contentPadding, interactionSource = source) {
         ButtonLabel(text, summary)
     }
 }
@@ -199,20 +211,16 @@ private fun ButtonLabel(text: String, summary: String?) {
 fun QuietButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, summary: String? = null, contentPadding: PaddingValues = BUTTON_PADDING) {
     val source = remember { MutableInteractionSource() }
     val scale by pressScale(source)
-    // Mono: paper with an ink outline, not a grey fill.
-    val mono = LocalLook.current.mono
     FilledTonalButton(
         onClick, modifier.graphicsLayer { scaleX = scale; scaleY = scale }, enabled, shape = buttonShape(), contentPadding = contentPadding, interactionSource = source,
-        colors = ButtonDefaults.filledTonalButtonColors(containerColor = if (mono) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.surfaceContainer, contentColor = MaterialTheme.colorScheme.primary),
-        border = if (mono) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.25f)) else null,
+        colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainer, contentColor = MaterialTheme.colorScheme.primary),
     ) { ButtonLabel(text, summary) }
 }
 
 /** A button that throws something away: red words, no fill, so it never looks like the way forward. */
 @Composable
 fun DangerButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    TextButton(onClick, modifier, shape = buttonShape(), colors = ButtonDefaults.textButtonColors(contentColor = LocalCleanColors.current.danger),
-        border = if (LocalLook.current.mono) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface) else null) {
+    TextButton(onClick, modifier, shape = buttonShape(), colors = ButtonDefaults.textButtonColors(contentColor = LocalCleanColors.current.danger)) {
         Text(text, fontWeight = FontWeight.SemiBold)
     }
 }
@@ -272,10 +280,8 @@ fun ProgressRing(
     val target = progress.coerceIn(0f, 1f)
     val sweep = remember { Animatable(if (motion) from ?: target else target) }
     LaunchedEffect(target, motion) { if (motion) sweep.animateTo(target, Motion.slow()) else sweep.snapTo(target) }
-    // Linen: a dark arc on a white track, as the ring sits in a grey tile.
-    val linen = LocalLook.current.sheetPage
-    val track = if (linen) (if (LocalOnTile.current) LocalLook.current.ringTrack else LocalLook.current.tile) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
-    val arc = if (linen) LocalLook.current.text else color
+    val track = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    val arc = color
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.matchParentSize()) {
             val width = stroke.toPx()
@@ -460,14 +466,22 @@ fun SwipeRow(left: SwipeAction?, right: SwipeAction? = null, modifier: Modifier 
     }
 }
 
+/** How many [Sheet] windows are open; the page behind shrinks a little and dims while any is (B6). */
+object SheetDepth {
+    var open by mutableStateOf(0)
+}
+
 /**
  * A menu or a set of choices at the bottom of the screen, in place of a grey box in the middle of it. It blinks in and out in place
- * (its own window, [BlinkWindow]); a drag down on its handle follows the finger and lets it go past a quarter of its height.
+ * (its own window, [BlinkWindow]), on the one glass material in its solid form (a window has nothing to blur). A grab handle and the
+ * title are its header: a drag down on the header follows the finger and lets it go past a quarter of its height or a quick flick;
+ * the content below scrolls. A tap outside, Back or "Close" for a screen reader closes it, and while it is open the page behind
+ * shrinks and dims ([SheetDepth]).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Sheet(onDismiss: () -> Unit, title: String? = null, content: @Composable ColumnScope.() -> Unit) {
-    val skin = clean.app.ui.theme.workoutSkin()
+    androidx.compose.runtime.DisposableEffect(Unit) { SheetDepth.open++; onDispose { SheetDepth.open-- } }
     androidx.compose.ui.window.Dialog(onDismiss, androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         BlinkWindow()
         val drag = remember { Animatable(0f) }
@@ -477,25 +491,26 @@ fun Sheet(onDismiss: () -> Unit, title: String? = null, content: @Composable Col
             Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.32f)).clickable(remember { MutableInteractionSource() }, null, onClick = onDismiss).statusBarsPadding(),
             contentAlignment = Alignment.BottomCenter,
         ) {
-            // Mono: a paper sheet with an ink outline along its top edge (the pad's surface and outline).
-            androidx.compose.material3.Surface(
+            Surface(
                 Modifier.fillMaxWidth().widthIn(max = 640.dp).onSizeChanged { height = it.height.coerceAtLeast(1) }
                     .graphicsLayer { translationY = drag.value }
-                    .then(if (skin.padBorder == Color.Transparent) Modifier else Modifier.border(skin.lineWidth, skin.padBorder, clean.app.ui.theme.SheetTopShape))
+                    .glass(clean.app.ui.theme.SheetTopShape, haze = null, lift = 16.dp)
                     .clickable(remember { MutableInteractionSource() }, null) { },
-                shape = clean.app.ui.theme.SheetTopShape, color = skin.padFill,
+                shape = clean.app.ui.theme.SheetTopShape, color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onSurface,
             ) {
                 Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = Space.m)) {
-                    androidx.compose.material3.BottomSheetDefaults.DragHandle(
-                        Modifier.align(Alignment.CenterHorizontally).draggable(
+                    Column(
+                        Modifier.fillMaxWidth().draggable(
                             rememberDraggableState { d -> scope.launch { drag.snapTo((drag.value + d).coerceAtLeast(0f)) } }, Orientation.Vertical,
-                            onDragStopped = { if (drag.value > height / 4f) onDismiss() else drag.animateTo(0f, Motion.follow()) },
+                            onDragStopped = { v -> if (drag.value > height / 4f || v > 1800f) onDismiss() else drag.animateTo(0f, Motion.follow()) },
                         ),
-                    )
-                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    ) {
+                        androidx.compose.material3.BottomSheetDefaults.DragHandle(
+                            Modifier.align(Alignment.CenterHorizontally).semantics { contentDescription = "Drag down to close"; onClick("Close") { onDismiss(); true } },
+                        )
                         if (title != null) Text(title, Modifier.padding(start = Space.xl, end = Space.xl, bottom = Space.s).semantics { heading() }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        content()
                     }
+                    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) { content() }
                 }
             }
         }
@@ -514,13 +529,8 @@ fun SheetRow(text: String, icon: ImageVector? = null, value: String = "", danger
         Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).padding(horizontal = Space.xl, vertical = Space.l),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.l),
     ) {
-        val circles = LocalLook.current.iconCircles
-        // Linen: the icon sits in a 36 dp grey circle (the row's text still lines up with the plain look's by the same gap).
-        if (icon != null && circles) Box(Modifier.size(36.dp).background(LocalLook.current.tile, androidx.compose.foundation.shape.CircleShape), contentAlignment = Alignment.Center) {
-            Icon(icon, null, Modifier.size(20.dp), tint = if (danger || !enabled) tint else LocalLook.current.text)
-        }
-        else if (icon != null) Icon(icon, null, Modifier.size(22.dp), tint = if (danger || !enabled) tint else MaterialTheme.colorScheme.onSurfaceVariant)
-        else Spacer(Modifier.width(if (circles) 36.dp else Space.xxl))
+        if (icon != null) Icon(icon, null, Modifier.size(22.dp), tint = if (danger || !enabled) tint else MaterialTheme.colorScheme.onSurfaceVariant)
+        else Spacer(Modifier.width(Space.xxl))
         Text(text, Modifier.weight(1f), color = tint, style = MaterialTheme.typography.bodyLarge)
         if (value.isNotEmpty()) Text(value, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -590,10 +600,8 @@ fun BarSpace() {
     Spacer(Modifier.height(LocalBarInset.current + Space.xxl))
 }
 
-/**
- * A dialog with AlertDialog's parameters. Under every look but Mono it is the Material AlertDialog (its surface is the scheme's high
- * container: white in Linen); Mono's is a paper surface with a 1 dp ink outline. Date and time pickers are the platform's and stay as they are.
- */
+
+/** A dialog with AlertDialog's parameters, drawn as glass in its solid form (a dialog is its own window, so nothing can be blurred behind it). Date and time pickers are the platform's and stay as they are. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CleanDialog(
@@ -604,33 +612,9 @@ fun CleanDialog(
     text: (@Composable () -> Unit)? = null,
     properties: androidx.compose.ui.window.DialogProperties = androidx.compose.ui.window.DialogProperties(),
 ) {
-    if (!LocalLook.current.mono) {
-        androidx.compose.material3.AlertDialog(onDismissRequest = onDismissRequest, confirmButton = { BlinkWindow(); confirmButton() }, dismissButton = dismissButton, title = title, text = text, properties = properties)
-        return
-    }
-    androidx.compose.material3.BasicAlertDialog(onDismissRequest = onDismissRequest, properties = properties) {
-        BlinkWindow()
-        androidx.compose.material3.Surface(
-            shape = clean.app.ui.theme.SheetShape, color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface),
-            modifier = Modifier.sizeIn(minWidth = 280.dp, maxWidth = 560.dp),
-        ) {
-            Column(Modifier.padding(Space.xxl)) {
-                if (title != null) Box(Modifier.padding(bottom = Space.l)) {
-                    androidx.compose.material3.ProvideTextStyle(MaterialTheme.typography.headlineSmall) { title() }
-                }
-                if (text != null) Box(Modifier.weight(1f, fill = false).padding(bottom = Space.xxl)) {
-                    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant) {
-                        androidx.compose.material3.ProvideTextStyle(MaterialTheme.typography.bodyMedium) { text() }
-                    }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    dismissButton?.invoke()
-                    confirmButton()
-                }
-            }
-        }
-    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismissRequest, modifier = Modifier.glass(GlassWindowShape, haze = null, lift = 18.dp), containerColor = Color.Transparent, tonalElevation = 0.dp, shape = GlassWindowShape,
+        confirmButton = { BlinkWindow(); confirmButton() }, dismissButton = dismissButton, title = title, text = text, properties = properties)
 }
 
 /**
@@ -652,8 +636,8 @@ fun UndoBar(model: AppModel, modifier: Modifier = Modifier) {
             if (motion) left.animateTo(0f, tween(remaining.toInt(), easing = LinearEasing))
         }
         Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = cardShape(), border = workoutSkin().panelBorder,
-            shadowElevation = 3.dp, modifier = Modifier.padding(horizontal = Space.m, vertical = Space.s),
+            color = Color.Transparent, shape = cardShape(),
+            modifier = Modifier.padding(horizontal = Space.m, vertical = Space.s).glass(cardShape(), haze = null, lift = 10.dp),
         ) {
             Column {
                 Row(Modifier.fillMaxWidth().padding(start = Space.l, end = Space.xs), verticalAlignment = Alignment.CenterVertically) {
@@ -663,6 +647,217 @@ fun UndoBar(model: AppModel, modifier: Modifier = Modifier) {
                 Box(Modifier.fillMaxWidth().height(2.dp)) {
                     Box(Modifier.fillMaxWidth(left.value).fillMaxHeight().background(MaterialTheme.colorScheme.primary))
                 }
+            }
+        }
+    }
+}
+
+// --- Glass: the material of what floats (tab bar, plus button, round buttons, the Workout sheet) ---
+
+/** The accent a running workout washes over the app (D6a), or null when none runs or on the workout page itself. Read by [glass]. */
+val LocalRunTint = staticCompositionLocalOf<Color?> { null }
+
+/** The blur source of the page behind the glass in this part of the tree, or null where there is none (glass is then solid). */
+val LocalHaze = staticCompositionLocalOf<dev.chrisbanes.haze.HazeState?> { null }
+
+/** True when glass may not blur: the Reduce transparency switch, the phone's own high-contrast setting, or Android below 12. Provided by the app. */
+val LocalSolidGlass = staticCompositionLocalOf { true }
+
+/** How much of the accent a running workout lays over the page: a little more in Dark, where it is harder to see. */
+private fun runTint(dark: Boolean) = if (dark) 0.08f else 0.06f
+
+private val GlassBlur = 22.dp
+private val GlassBlurStyle = dev.chrisbanes.haze.HazeStyle(backgroundColor = Color.Unspecified, tints = emptyList(), blurRadius = GlassBlur, noiseFactor = 0f)
+private val GlassBlurBlock: dev.chrisbanes.haze.HazeEffectScope.() -> Unit = { blurRadius = GlassBlur; noiseFactor = 0f }
+
+/**
+ * The look while a workout runs: with [running], the page colour (`background`) takes a little of the accent and [glass] tints toward it.
+ * The structure is the same whether on or off, so what is inside keeps its state when a workout starts or ends.
+ */
+@Composable
+fun RunningLook(running: Boolean, content: @Composable () -> Unit) {
+    val accent = clean.app.ui.theme.LocalLook.current.orange
+    val dark = clean.app.ui.theme.LocalLook.current.dark
+    val scheme = MaterialTheme.colorScheme
+    val page by androidx.compose.animation.animateColorAsState(
+        if (running) accent.copy(alpha = runTint(dark)).compositeOver(scheme.background) else scheme.background, if (LocalMotion.current) tween(300) else snap(), label = "run tint",
+    )
+    MaterialTheme(colorScheme = scheme.copy(background = page), typography = MaterialTheme.typography, shapes = MaterialTheme.shapes) {
+        androidx.compose.runtime.CompositionLocalProvider(LocalRunTint provides accent.takeIf { running }, content = content)
+    }
+}
+
+/**
+ * The one glass surface (A1). With [haze] (a source behind it) and blur allowed, the page behind is blurred 22 dp under a tint of 74 %;
+ * without, the same material is drawn with an opaque tint (97 %), so text keeps its contrast whatever scrolls behind. The material is
+ * neutral: a tint with a faint top-to-bottom light, a lit top edge, a darker bottom edge, a hairline inside and a soft wide shadow ([lift]
+ * is its height). While a workout runs the tint takes a little of the accent. Everything that floats is drawn with this.
+ */
+@Composable
+fun Modifier.glass(shape: Shape, haze: dev.chrisbanes.haze.HazeState? = LocalHaze.current, lift: Dp = 14.dp): Modifier {
+    val dark = clean.app.ui.theme.LocalLook.current.dark
+    val blur = haze != null && !LocalSolidGlass.current
+    val run = LocalRunTint.current
+    val base = if (dark) Color(0xFF1E1F23) else Color.White
+    val tint = if (run == null) base else androidx.compose.ui.graphics.lerp(base, run, if (dark) 0.15f else 0.10f)
+    // Alpha at the top and the bottom of the tint: the least that keeps 4.5 : 1 on text over the blur, or solid.
+    val top = if (!blur) 0.97f else if (dark) 0.74f else 0.85f
+    val bottom = if (!blur) 0.97f else if (dark) 0.74f else 0.70f
+    val shadow = if (dark) Color.Black.copy(alpha = 0.60f) else Color.Black.copy(alpha = 0.16f)
+    val lit = if (dark) Color.White.copy(alpha = 0.20f) else Color.White
+    val under = if (dark) Color.Black.copy(alpha = 0.45f) else Color.Black.copy(alpha = 0.06f)
+    val hair = if (dark) Color.White.copy(alpha = 0.04f) else Color.Black.copy(alpha = 0.03f)
+    return this
+        .shadow(lift, shape, clip = false, ambientColor = shadow.copy(alpha = shadow.alpha * 0.5f), spotColor = shadow)
+        .clip(shape)
+        .then(if (blur) Modifier.hazeEffect(haze, GlassBlurStyle, GlassBlurBlock) else Modifier)
+        .drawBehind {
+            val outline = shape.createOutline(size, layoutDirection, this)
+            drawOutline(outline, Brush.verticalGradient(listOf(tint.copy(alpha = top), tint.copy(alpha = bottom))))
+            // The faint light from above (9 % to 2 % white in Dark).
+            if (dark) drawOutline(outline, Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.09f), Color.White.copy(alpha = 0.02f))))
+            val line = 2.dp.toPx() // half of it is outside the clip: 1 dp shows
+            drawOutline(outline, hair, style = Stroke(line * 2f))
+            drawOutline(outline, Brush.verticalGradient(0f to lit, 0.3f to Color.Transparent, 0.7f to Color.Transparent, 1f to under), style = Stroke(line))
+        }
+}
+
+/** A 34 dp round glass button with a 48 dp touch area; [content] is its icon or letter. It sits in a page, so its glass has no blur behind it. */
+@Composable
+fun GlassButton(description: String, onClick: () -> Unit, modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
+    Box(
+        modifier.size(48.dp).clip(CircleShape).clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onClick).semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) { Box(Modifier.size(34.dp).glass(CircleShape, haze = null, lift = 0.dp), contentAlignment = Alignment.Center, content = content) }
+}
+
+/**
+ * A section laid out on the page (1.1.0, D2): a small grey uppercase heading, then the content, with air around it and no card.
+ * Numbers, lists and charts sit like this; a card is only for one object that is opened as a whole.
+ */
+@Composable
+fun PageSection(title: String, modifier: Modifier = Modifier, spacing: Dp = Space.m, content: @Composable ColumnScope.() -> Unit) {
+    val lines = rememberRowLines()
+    Column(modifier.fillMaxWidth().drawRowLines(lines).padding(horizontal = Space.l, vertical = Space.m), verticalArrangement = Arrangement.spacedBy(spacing)) {
+        if (title.isNotEmpty()) PageHeading(title)
+        androidx.compose.runtime.CompositionLocalProvider(LocalRowLines provides lines) { content() }
+    }
+}
+
+/** A card's soft wide shadow in Light (B4); in Dark the card is a step lighter than the page instead, so nothing is drawn. */
+@Composable
+fun Modifier.cardDepth(shape: Shape): Modifier {
+    val look = clean.app.ui.theme.LocalLook.current
+    return if (!look.dark) shadow(16.dp, shape, clip = false, ambientColor = Color.Black.copy(alpha = 0.06f), spotColor = Color.Black.copy(alpha = 0.16f)) else this
+}
+
+/**
+ * A segmented control (1.1.0): a quiet track with the chosen option as a raised pill, for a few exclusive choices that switch what
+ * the page shows (Week / Month / Year / All, a body view). With [morph] the chosen option's word is the page's side of a [MorphText].
+ */
+@Composable
+fun <T> Segmented(options: List<T>, selected: T, label: (T) -> String, modifier: Modifier = Modifier, morph: String? = null, onSelect: (T) -> Unit) {
+    val track = MaterialTheme.shapes.medium
+    val pill = MaterialTheme.shapes.small
+    Row(modifier.fillMaxWidth().background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f), track).padding(3.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        for (option in options) {
+            val on = option == selected
+            Box(
+                Modifier.weight(1f).heightIn(min = 40.dp)
+                    .then(if (on) Modifier.background(MaterialTheme.colorScheme.surfaceVariant, pill) else Modifier)
+                    .clip(pill)
+                    .selectable(on, role = androidx.compose.ui.semantics.Role.RadioButton) { onSelect(option) },
+                contentAlignment = Alignment.Center,
+            ) {
+                val ink = if (on) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                val weight = if (on) FontWeight.SemiBold else FontWeight.Normal
+                if (on && morph != null) MorphText(androidx.compose.ui.text.AnnotatedString(label(option)), morph, onPage = true, style = MaterialTheme.typography.labelLarge, color = ink, fontWeight = weight, maxLines = 1)
+                else Text(label(option), style = MaterialTheme.typography.labelLarge, color = ink, fontWeight = weight, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** A menu of the one glass material in its solid form (menus are their own windows): the same tint, lit top edge and shadow as a sheet, the dialog's corner. */
+@Composable
+fun CleanMenu(expanded: Boolean, onDismissRequest: () -> Unit, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    androidx.compose.material3.DropdownMenu(
+        expanded, onDismissRequest, modifier.glass(GlassWindowShape, haze = null, lift = 0.dp),
+        containerColor = Color.Transparent, tonalElevation = 0.dp, shadowElevation = 12.dp, shape = GlassWindowShape, content = content,
+    )
+}
+
+// --- D2 hairlines: a thin line between the rows of a list-like section ---
+
+/**
+ * The rows of one page section ([Section], [PageSection]) that want a hairline between them. A row ([LabelValue]) reports its place;
+ * the section draws a line in the gap between two rows that sit next to each other, so a chart or a figure between rows, a lone row
+ * or the section's ends get none. Places are asked for when drawing, so scrolling cannot make them stale.
+ */
+class RowLines {
+    internal val rows = HashMap<Any, androidx.compose.ui.layout.LayoutCoordinates>()
+    internal var section: androidx.compose.ui.layout.LayoutCoordinates? = null
+}
+
+val LocalRowLines = staticCompositionLocalOf<RowLines?> { null }
+
+@Composable
+fun rememberRowLines() = remember { RowLines() }
+
+/** Tells the section where this row is for as long as it is on the screen. */
+@Composable
+fun Modifier.rowLine(lines: RowLines): Modifier {
+    val key = remember { Any() }
+    androidx.compose.runtime.DisposableEffect(key) { onDispose { lines.rows.remove(key) } }
+    return onGloballyPositioned { lines.rows[key] = it }
+}
+
+/** Draws the hairlines for [lines] in the gaps between neighbouring rows (the gap is the section's spacing, so a farther one is not a neighbour). */
+@Composable
+fun Modifier.drawRowLines(lines: RowLines): Modifier {
+    val colour = MaterialTheme.colorScheme.outlineVariant
+    return onGloballyPositioned { lines.section = it }.drawBehind {
+        val section = lines.section?.takeIf { it.isAttached } ?: return@drawBehind
+        val spans = lines.rows.values.filter { it.isAttached }.map { row ->
+            val top = section.localPositionOf(row, Offset.Zero).y
+            top to top + row.size.height
+        }.sortedBy { it.first }
+        val limit = 14.dp.toPx()
+        for (i in 0 until spans.size - 1) {
+            val gap = spans[i + 1].first - spans[i].second
+            if (gap in -1f..limit) {
+                val y = (spans[i].second + spans[i + 1].first) / 2f
+                drawLine(colour, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+            }
+        }
+    }
+}
+
+/**
+ * The one line that says what happened (B8): glass, at the top, for four seconds (six with an action such as View). What was said is
+ * [AppModel.notice]; [AppModel.say] has its own bar, [UndoBar], in the same material.
+ */
+@Composable
+fun NoticeToast(model: AppModel, modifier: Modifier = Modifier) {
+    val notice = model.notice
+    val motion = LocalMotion.current
+    LaunchedEffect(notice) {
+        if (notice == null) return@LaunchedEffect
+        kotlinx.coroutines.delay(if (notice.action != null) 6000L else 4000L)
+        if (model.notice === notice) model.notice = null
+    }
+    AnimatedVisibility(notice != null, modifier, enter = Motion.appear(motion), exit = Motion.vanish(motion)) {
+        // Kept while the toast fades away, so its words do not vanish first.
+        val shown = remember { mutableStateOf(notice) }
+        if (notice != null) shown.value = notice
+        Surface(
+            color = Color.Transparent, shape = cardShape(),
+            modifier = Modifier.padding(horizontal = Space.m, vertical = Space.s).glass(cardShape(), haze = null, lift = 10.dp)
+                .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+        ) {
+            Row(Modifier.fillMaxWidth().padding(start = Space.l, end = Space.xs), verticalAlignment = Alignment.CenterVertically) {
+                Text(shown.value?.text.orEmpty(), Modifier.weight(1f).padding(vertical = Space.m))
+                shown.value?.let { n -> if (n.action != null) TextButton(onClick = { model.notice = null; n.onAction?.invoke() }) { Text(n.action, fontWeight = FontWeight.SemiBold) } }
             }
         }
     }

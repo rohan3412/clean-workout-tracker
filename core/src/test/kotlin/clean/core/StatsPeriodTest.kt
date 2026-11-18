@@ -22,6 +22,16 @@ class StatsPeriodTest {
         assertEquals(DayRange(d("2026-10-05"), d("2026-10-07")), previousRange(StatsPeriod.WEEK, wed))
     }
 
+    @Test fun comparisonSentenceNamesTheCountAndTheVolume() {
+        val before = PeriodTotals(4, 1000.0, 0, 0.0)
+        assertEquals("1 fewer workout than October, volume down 8 %", comparisonSentence(PeriodTotals(3, 920.0, 0, 0.0), before, "October"))
+        assertEquals("2 more workouts than last week, volume up 50 %", comparisonSentence(PeriodTotals(6, 1500.0, 0, 0.0), before, "last week"))
+        assertEquals("Same number of workouts as last year, volume the same", comparisonSentence(PeriodTotals(4, 1000.0, 0, 0.0), before, "last year"))
+        assertEquals("3 more workouts than October", comparisonSentence(PeriodTotals(3, 500.0, 0, 0.0), PeriodTotals(0, 0.0, 0, 0.0), "October"))
+        assertEquals("October", previousName(StatsPeriod.MONTH, d("2026-11-17")))
+        assertNull(previousName(StatsPeriod.ALL, d("2026-11-17")))
+    }
+
     @Test fun monthComparesTheSameDaysOfTheMonthBefore() {
         val today = d("2026-10-16")
         assertEquals(DayRange(d("2026-10-01"), today), periodRange(StatsPeriod.MONTH, today, null))

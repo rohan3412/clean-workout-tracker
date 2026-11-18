@@ -37,6 +37,7 @@ import clean.core.recordsBySide
 import clean.core.sidesLine
 import clean.core.sidesSpoken
 import clean.core.sessionsByExercise
+import clean.core.shortNumber
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.Dispatchers
@@ -63,6 +64,11 @@ fun PersonalBestsScreen(model: AppModel) {
     val rule by model.oneRm.collectAsState()
     var view by model.remembered("personalBests", "Best lifts")
     var query by remember { mutableStateOf("") }
+    // The exercise with most working sets over the whole history (it moved here from Progress, 1.1.0).
+    val topExercise = remember(workouts) {
+        val first = workouts.firstOrNull()?.let { java.time.LocalDate.parse(it.day) }
+        first?.let { clean.core.topExercise(workouts, clean.core.DayRange(it, java.time.LocalDate.now())) }
+    }
     val lifts by produceState(emptyList<BestLift>(), workouts, settings, bodyweights, rule) {
         value = withContext(Dispatchers.Default) {
             sessionsByExercise(workouts).mapNotNull { (name, sessions) ->
@@ -89,7 +95,8 @@ fun PersonalBestsScreen(model: AppModel) {
         LazyColumn(Modifier.padding(padding).fillMaxSize()) {
             item {
                 Column(Modifier.padding(horizontal = Space.l, vertical = Space.xs), verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                    Choice(listOf("Best lifts", "By month"), view, { it }) { view = it }
+                    topExercise?.let { (name, sets) -> NavRow("Top exercise", "$name, ${setsText(shortNumber(sets))}", { model.open(Screen.ExerciseDetail(name)) }, "progress:stat:exercise") }
+                    Segmented(listOf("Best lifts", "By month"), view, { it }) { view = it }
                     if (view == "Best lifts") OutlinedTextField(query, { query = it }, placeholder = { Text("Search exercises") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 }
             }
@@ -133,7 +140,7 @@ fun PersonalBestsScreen(model: AppModel) {
                             Modifier.fillMaxWidth().clickable { opened = if (isOpen) open - month else open + month }.padding(start = Space.l, end = Space.l, top = Space.l, bottom = Space.s),
                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s),
                         ) {
-                            SectionTitle(runCatching { YearMonth.parse(month).format(MONTH_HEAD) }.getOrDefault(month), Modifier.weight(1f))
+                            Caption(runCatching { YearMonth.parse(month).format(MONTH_HEAD) }.getOrDefault(month), Modifier.weight(1f))
                             // A PR of one side of a round counts a half.
                             Text("${prsText(prCount(rows))}  ${if (isOpen) "▾" else "▸"}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }

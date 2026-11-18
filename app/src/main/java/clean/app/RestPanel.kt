@@ -7,7 +7,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -49,7 +48,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import clean.app.ui.theme.cardShape
-import clean.app.ui.theme.numbers
 import clean.app.ui.theme.workoutSkin
 import clean.core.DEFAULT_REST_HIDE
 import clean.core.REST_RETURN_SECONDS
@@ -59,8 +57,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 
-/** What a workout's rows do when a set is ticked or earns a PR: kv `feedback.tick` (off, light, strong) and `pr.celebrate` (none, glow, confetti). */
-class Feel(val tick: String = "light", val celebrate: String = "none", val swipeRight: String = "finish", val swipeLeft: String = "delete")
+/** What a workout's rows do when a set is ticked: the tick's buzz (light, off with Animations off) and the swipes (right finishes, left removes; the Correct page has no finishing). */
+class Feel(val tick: String = "light", val swipeRight: String = "finish", val swipeLeft: String = "delete")
 
 val LocalFeel = compositionLocalOf { Feel() }
 
@@ -91,16 +89,13 @@ fun RestPresets(presets: List<Int>, onPick: (Int) -> Unit, modifier: Modifier = 
 
 
 /**
- * The rest in progress, shown as Settings asks (kv `rest.style`): a full-screen countdown over the list, a card with a ring, a slim
- * bar, or the full screen that shrinks into a pill after a few seconds. The strip styles sit above [content]; the full screen
- * covers it. The top bar's own time stays whatever the style, and its tap still opens the rest's options ([onOptions]).
+ * The rest in progress, the one style since 1.1.0: a full-screen countdown over the list that shrinks into a pill after
+ * [DEFAULT_REST_HIDE] seconds (Hide does it at once; a tap on the pill brings it back, and it returns by itself for the last
+ * [REST_RETURN_SECONDS]). The panel covers [content]. The top bar's own time stays, and its tap still opens the rest's options ([onOptions]).
  */
 @Composable
 fun RestDisplay(model: AppModel, draft: Draft, onOptions: () -> Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    val stored by model.options.collectAsState()
-    val style = stored["rest.style"]?.takeIf { it in listOf("full", "ring", "bar", "hide") } ?: "full"
-    val hideAfter = stored["rest.hideAfter"]?.toIntOrNull() ?: DEFAULT_REST_HIDE
-    val presets = parseRestPresets(stored["rest.presets"])
+    val presets = parseRestPresets(null)
     val running = model.restEnd != null
     // Per rest: the pill was tapped (the full screen is back), or "Hide" was pressed.
     var reopened by remember(running) { mutableStateOf(false) }
@@ -112,32 +107,21 @@ fun RestDisplay(model: AppModel, draft: Draft, onOptions: () -> Unit, modifier: 
     val next = remember(draft) { nextSetOf(draft) }
     val fullAt: (Long) -> Boolean = { now ->
         val left = (kept[0] - now) / 1000
-        when (style) {
-            "full" -> !hidden
-            "hide" -> restShowsFull(kept[1] - left, left, hideAfter, reopened) && (!hidden || left <= REST_RETURN_SECONDS)
-            else -> false
-        }
+        restShowsFull(kept[1] - left, left, DEFAULT_REST_HIDE, reopened) && (!hidden || left <= REST_RETURN_SECONDS)
     }
     val again = { seconds: Int -> reopened = false; hidden = false; model.startRest(seconds) }
     Column(modifier.fillMaxSize()) {
-        // The strip: a ring card, a slim bar, or the pill that stands in for a hidden full screen.
+        // The pill that stands in for the hidden full screen.
         AnimatedVisibility(running, enter = Motion.appear(motion), exit = Motion.vanish(motion)) {
             val now = nowMillis()
             val left = ((kept[0] - now) / 1000).coerceAtLeast(0)
-            val fraction = (kept[0] - now) / (kept[1] * 1000f)
-            when {
-                style == "ring" -> RestRingCard(left, fraction, next, presets, again, { model.changeRest(it) }, { model.startRest(0) }, onOptions)
-                style == "bar" -> RestBar(left, fraction, next, onOptions)
-                !fullAt(now) -> RestPill(left) { reopened = true; hidden = false }
-            }
+            if (!fullAt(now)) RestPill(left) { reopened = true; hidden = false }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             content()
-            if (style == "full" || style == "hide") {
-                // Reads the clock itself, so only this layer is redrawn each second.
-                val now = nowMillis()
-                FullLayer(running && fullAt(now), motion, ((kept[0] - now) / 1000).coerceAtLeast(0), (kept[0] - now) / (kept[1] * 1000f), next, presets, again, { model.changeRest(it) }, { model.startRest(0) }, { hidden = true; reopened = false }, onOptions)
-            }
+            // Reads the clock itself, so only this layer is redrawn each second.
+            val now = nowMillis()
+            FullLayer(running && fullAt(now), motion, ((kept[0] - now) / 1000).coerceAtLeast(0), (kept[0] - now) / (kept[1] * 1000f), next, presets, again, { model.changeRest(it) }, { model.startRest(0) }, { hidden = true; reopened = false }, onOptions)
         }
     }
 }
@@ -157,13 +141,13 @@ private fun FullLayer(
 private fun RestFull(left: Long, fraction: Float, next: NextSet?, presets: List<Int>, onPick: (Int) -> Unit, onAdd: (Int) -> Unit, onSkip: () -> Unit, onHide: () -> Unit, onOptions: () -> Unit) {
     // The panel takes the touches, so nothing in the list behind it is pressed by mistake.
     Column(
-        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).pointerInput(Unit) { detectTapGestures { } }.padding(horizontal = Space.xxl, vertical = Space.l),
+        Modifier.fillMaxSize().glass(androidx.compose.ui.graphics.RectangleShape, lift = 0.dp).pointerInput(Unit) { detectTapGestures { } }.padding(horizontal = Space.xxl, vertical = Space.l),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
         Text("Rest", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         ProgressRing(fraction, Modifier.padding(vertical = Space.l).size(260.dp).clickable(onClickLabel = "Rest options", onClick = onOptions), stroke = 10.dp) {
             Text(
-                clock(left), Modifier.semantics { contentDescription = "Rest, ${clock(left)} left" }, style = MaterialTheme.typography.displayLarge.numbers(), fontWeight = FontWeight.Bold,
+                clock(left), Modifier.semantics { contentDescription = "Rest, ${clock(left)} left" }, style = MaterialTheme.typography.displayLarge, fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
             )
         }
@@ -179,95 +163,10 @@ private fun RestFull(left: Long, fraction: Float, next: NextSet?, presets: List<
 }
 
 @Composable
-private fun RestRingCard(left: Long, fraction: Float, next: NextSet?, presets: List<Int>, onPick: (Int) -> Unit, onAdd: (Int) -> Unit, onSkip: () -> Unit, onOptions: () -> Unit) {
-    Surface(Modifier.fillMaxWidth().padding(horizontal = Space.m, vertical = Space.xs), shape = cardShape(), color = MaterialTheme.colorScheme.surfaceContainerHigh, border = workoutSkin().panelBorder) {
-        Column(Modifier.padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.l)) {
-                ProgressRing(fraction, Modifier.size(72.dp).clickable(onClickLabel = "Rest options", onClick = onOptions)) {
-                    Text(clock(left), Modifier.semantics { contentDescription = "Rest, ${clock(left)} left" }, style = MaterialTheme.typography.titleMedium.numbers(), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(next?.words(withExercise = false) ?: "Rest", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row {
-                        TextButton(onClick = { onAdd(-15) }) { Text("−15 s") }
-                        TextButton(onClick = { onAdd(15) }) { Text("+15 s") }
-                        TextButton(onClick = onSkip) { Text("Skip", fontWeight = FontWeight.SemiBold) }
-                    }
-                }
-            }
-            RestPresets(presets, onPick)
-        }
-    }
-}
-
-@Composable
-private fun RestBar(left: Long, fraction: Float, next: NextSet?, onOptions: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClickLabel = "Rest options", onClick = onOptions).padding(horizontal = Space.l, vertical = Space.s)) {
-        Text(
-            "Rest ${clock(left)}" + (next?.let { " · Next: " + (it.values ?: "set ${it.number}") } ?: ""), Modifier.minTouch().wrapContentHeight(Alignment.CenterVertically),
-            style = MaterialTheme.typography.bodyLarge.numbers(), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary,
-        )
-        val shown by animateFloatAsState(fraction.coerceIn(0f, 1f), Motion.clock(), label = "bar")
-        Box(Modifier.fillMaxWidth().height(3.dp).background(MaterialTheme.colorScheme.surfaceVariant)) {
-            Box(Modifier.fillMaxWidth(shown).height(3.dp).background(MaterialTheme.colorScheme.primary))
-        }
-    }
-}
-
-@Composable
 private fun RestPill(left: Long, onClick: () -> Unit) {
     Box(Modifier.fillMaxWidth().padding(top = Space.xs), contentAlignment = Alignment.Center) {
-        Surface(Modifier.minTouch().clickable(onClickLabel = "Show the rest", onClick = onClick), shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primaryContainer, border = workoutSkin().panelBorder) {
-            Text("Rest ${clock(left)}", Modifier.padding(horizontal = Space.l, vertical = Space.s), style = MaterialTheme.typography.labelLarge.numbers(), color = MaterialTheme.colorScheme.onPrimaryContainer)
+        Surface(Modifier.glass(RoundedCornerShape(50), lift = 8.dp).minTouch().clickable(onClickLabel = "Show the rest", onClick = onClick), shape = RoundedCornerShape(50), color = androidx.compose.ui.graphics.Color.Transparent) {
+            Text("Rest ${clock(left)}", Modifier.padding(horizontal = Space.l, vertical = Space.s), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
         }
     }
-}
-
-/**
- * The celebration over a set row that has just earned a PR (kv `pr.celebrate`): a soft glow in the accent that fades, or a short burst
- * of small accent pieces from the tick's side. Only when the row earns it while it is on screen, and never with animations off.
- */
-@Composable
-fun Modifier.prCelebration(earned: Boolean): Modifier {
-    val style = LocalFeel.current.celebrate
-    val motion = LocalMotion.current
-    val t = remember { Animatable(1f) }
-    var was by remember { mutableStateOf(earned) }
-    LaunchedEffect(earned) {
-        if (earned && !was && motion && style != "none") {
-            t.snapTo(0f)
-            t.animateTo(1f, if (style == "confetti") Motion.confetti() else Motion.glow())
-        }
-        was = earned
-    }
-    val accent = MaterialTheme.colorScheme.primary
-    val pieces = remember { List(36) { Piece(Random.Default) } }
-    if (!motion || style == "none") return this
-    return drawWithContent {
-        drawContent()
-        val p = t.value
-        if (p >= 1f) return@drawWithContent
-        if (style == "glow") {
-            val fade = (1f - p) * (1f - p)
-            drawRoundRect(accent.copy(alpha = 0.30f * fade), size = size, cornerRadius = CornerRadius(8.dp.toPx()))
-            drawRoundRect(accent.copy(alpha = 0.9f * fade), size = size, cornerRadius = CornerRadius(8.dp.toPx()), style = Stroke(2.dp.toPx()))
-        } else {
-            val origin = Offset(size.width - 28.dp.toPx(), size.height / 2)
-            val reach = 130.dp.toPx()
-            val ease = 1f - (1f - p) * (1f - p)
-            for (piece in pieces) {
-                val x = origin.x + cos(piece.angle) * piece.speed * reach * ease
-                val y = origin.y + sin(piece.angle) * piece.speed * reach * ease + 90.dp.toPx() * p * p
-                drawCircle(accent.copy(alpha = (1f - p * p).coerceIn(0f, 1f) * piece.strength), piece.radius.dp.toPx(), Offset(x, y))
-            }
-        }
-    }
-}
-
-/** One piece of confetti: the direction it leaves in, how far it goes, its size and how bright it is. */
-private class Piece(random: Random) {
-    val angle = random.nextFloat() * 2f * Math.PI.toFloat()
-    val speed = 0.35f + random.nextFloat() * 0.65f
-    val radius = 1.5f + random.nextFloat() * 2.5f
-    val strength = 0.55f + random.nextFloat() * 0.45f
 }

@@ -37,6 +37,12 @@ A few icons (`app/src/main/java/clean/app/CleanIcons.kt`) are the outlines of Go
 [Material icons](https://github.com/google/material-design-icons), used under the Apache License,
 Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0). Their path data is unchanged.
 
+## Haze
+
+The blur behind the tab bar, plus button and sheets is done by [Haze](https://github.com/chrisbanes/haze)
+by Chris Banes, used under the Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
+Haze is used as a library, unchanged; it has no network access.
+
 ## Exercise instructions
 
 The how-to steps shown for built-in exercises (`app/src/main/assets/exercise_info.json`) are the
@@ -71,12 +77,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Numbers font
+## Font
 
-The numbers of the Mono look (`app/src/main/res/font/plex_mono_*.ttf`) are set in IBM Plex Mono,
-Copyright © 2017 IBM Corp. with Reserved Font Name "Plex", used under the SIL Open Font License,
-Version 1.1. The licence text is in `tools/fonts/IBMPlexMono-OFL.txt`. The font files are unchanged.
-
-The text and numbers of the Linen look (`app/src/main/res/font/inter.ttf`, one variable font with the weight axis)
-are set in Inter, Copyright 2020 The Inter Project Authors (github.com/rsms/inter), used under the SIL Open
-Font License, Version 1.1. The licence text is in `tools/fonts/Inter-OFL.txt`. The font file is unchanged.
+The text and numbers (`app/src/main/res/font/inter.ttf`, one variable font with the weight axis) are set in Inter,
+Copyright 2020 The Inter Project Authors (github.com/rsms/inter), used under the SIL Open Font License,
+Version 1.1. The licence text is in `tools/fonts/Inter-OFL.txt`. The font file is unchanged.

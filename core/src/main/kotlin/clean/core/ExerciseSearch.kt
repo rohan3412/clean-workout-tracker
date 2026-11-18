@@ -24,6 +24,15 @@ private val SYNONYMS: Map<String, List<String>> = mapOf(
     "quad" to listOf("quads"), "ham" to listOf("hamstrings"), "hams" to listOf("hamstrings"), "hammies" to listOf("hamstrings"),
     "glute" to listOf("glutes"), "calf" to listOf("calves"), "calves" to listOf("calf"), "ab" to listOf("abs"),
     "military" to listOf("overhead"), "overhead" to listOf("shoulder"), "shoulder" to listOf("overhead"),
+    // Lifts by their initials and the spellings people use for them.
+    "ghr" to listOf("glute ham raise"), "ht" to listOf("hip thrust"), "hipthrust" to listOf("hip thrust"), "bss" to listOf("bulgarian split squat"),
+    "gm" to listOf("good morning"), "hspu" to listOf("handstand push up"), "cgbp" to listOf("close grip bench press"),
+    "dl" to listOf("deadlift"), "sq" to listOf("squat"), "alt" to listOf("alternating"),
+    "pullup" to listOf("pull up", "chin up"), "chinup" to listOf("chin up", "pull up"),
+    "fly" to listOf("flye"), "flye" to listOf("fly"), "flyes" to listOf("fly"), "flies" to listOf("fly"),
+    "pressdown" to listOf("pushdown", "push down"), "pushdown" to listOf("push down", "pressdown"),
+    "skullcrusher" to listOf("skull crusher", "lying triceps extension"), "facepull" to listOf("face pull"), "tbar" to listOf("t bar"),
+    "hex" to listOf("trap bar"),
 )
 
 /** Two typed words that mean one thing, and what they stand for. */
@@ -32,7 +41,18 @@ private val PHRASES: Map<Pair<String, String>, List<String>> = mapOf(
     ("skull" to "crusher") to listOf("skullcrusher", "lying triceps extension"),
     ("skull" to "crushers") to listOf("skullcrusher", "lying triceps extension"),
     ("military" to "press") to listOf("overhead press", "shoulder press"),
+    ("pull" to "up") to listOf("chin up"), ("pull" to "ups") to listOf("chin up"), ("chin" to "up") to listOf("pull up"), ("chin" to "ups") to listOf("pull up"),
+    ("push" to "down") to listOf("pressdown"),
 )
+
+/** What a plural typed word may be the plural of. */
+private fun singulars(w: String): List<String> {
+    val out = ArrayList<String>(2)
+    if (w.length >= 3 && w.endsWith("ies")) out += w.dropLast(3) + "y"
+    if (w.length >= 4 && w.endsWith("s")) out += w.removeSuffix("s")
+    if (w.length >= 5 && w.endsWith("es")) out += w.removeSuffix("es")
+    return out
+}
 
 /** One typed word (or phrase): the ways it may match, each a list of words that must all be found. */
 private class Term(val ways: List<List<String>>)
@@ -51,9 +71,11 @@ private fun termsOf(query: String): List<Term> {
         val w = words[i]
         val ways = mutableListOf(listOf(w))
         SYNONYMS[w]?.forEach { ways += searchWords(it) }
-        // "rows" finds Row, "presses" Press.
-        if (w.length >= 4 && w.endsWith("s")) ways += listOf(w.removeSuffix("s"))
-        if (w.length >= 5 && w.endsWith("es")) ways += listOf(w.removeSuffix("es"))
+        // "rows" finds Row, "presses" Press, "flies" Fly, "rdls" what "rdl" finds.
+        for (base in singulars(w)) {
+            ways += listOf(base)
+            SYNONYMS[base]?.forEach { ways += searchWords(it) }
+        }
         terms += Term(ways)
         i++
     }

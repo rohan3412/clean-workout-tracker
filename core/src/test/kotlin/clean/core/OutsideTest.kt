@@ -9,20 +9,9 @@ import kotlin.test.assertTrue
 
 class OutsideTest {
     @Test
-    fun shortcutsReadOrFallBack() {
-        assertEquals(SHORTCUTS_DEFAULT, parseShortcuts(null))
-        assertEquals(emptyList(), parseShortcuts(""))
-        assertEquals(listOf(ShortcutKind.WEIGHT, ShortcutKind.START), parseShortcuts("weight, start,start,nope"))
-        assertNull(encodeShortcuts(SHORTCUTS_DEFAULT))
-        assertEquals("weight,start", encodeShortcuts(listOf(ShortcutKind.WEIGHT, ShortcutKind.START)))
-        assertEquals("", encodeShortcuts(emptyList()))
-        assertEquals(emptyList(), parseShortcuts(encodeShortcuts(emptyList())))
-    }
-
-    @Test
     fun resumeOnlyWhileRunning() {
-        assertEquals(listOf(ShortcutKind.START, ShortcutKind.WEIGHT), shortcutsShown(SHORTCUTS_DEFAULT, false))
-        assertEquals(SHORTCUTS_DEFAULT, shortcutsShown(SHORTCUTS_DEFAULT, true))
+        assertEquals(listOf(ShortcutKind.START, ShortcutKind.WEIGHT), shortcutsShown(false))
+        assertEquals(ShortcutKind.entries.toList(), shortcutsShown(true))
     }
 
     @Test
@@ -35,8 +24,6 @@ class OutsideTest {
 
     @Test
     fun notificationFormAndColours() {
-        assertTrue(restNotifCompact("compact"))
-        assertFalse(restNotifCompact(null))
         assertEquals(listOf(-1, 5, 0), decodeArgb(encodeArgb(listOf(-1, 5, 0)), 3))
         assertNull(decodeArgb("1,2", 3))
         assertNull(decodeArgb("1,x,3", 3))

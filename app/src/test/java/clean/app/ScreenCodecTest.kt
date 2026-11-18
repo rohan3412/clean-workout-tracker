@@ -11,8 +11,8 @@ import org.junit.Test
 class ScreenCodecTest {
     private val pages = listOf(
         Screen.Active, Screen.Settings, Screen.ExerciseSetup, Screen.Chart, Screen.Trends, Screen.Bmi, Screen.Trophies, Screen.Program,
-        Screen.PersonalBests, Screen.History, Screen.Body, Screen.Measurements, Screen.EditHome, Screen.EditProfile, Screen.Navigation,
-        Screen.Shortcuts, Screen.Photos,
+        Screen.PersonalBests, Screen.History, Screen.Body, Screen.Measurements,
+        Screen.Photos, Screen.Profile,
         Screen.TemplateEdit(null), Screen.TemplateEdit(12), Screen.WorkoutDetail("2026-10-01 18:00:00"),
         Screen.ExerciseDetail("Bench Press (Barbell)"), Screen.ExerciseDetail("Squat  ", edit = true, tab = 2),
         Screen.Summary("2026-10-01 18:00:00"), Screen.Week("2026-09-28"), Screen.MeasurementDetail("weight.csv"),

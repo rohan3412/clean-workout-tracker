@@ -1,21 +1,9 @@
 package clean.app
 
-import clean.core.ChartStyle
 import clean.core.planIsoRowFix
 import clean.core.rowsOfWorkouts
-import clean.core.NO_TEMPLATE_COLOR
-import clean.core.TemplateColorMode
-import clean.core.assignTemplateColors
-import clean.core.chartStyleOf
-import clean.core.encodeTemplateColor
 import clean.core.hueOfRgb
-import clean.core.nearestToAccent
-import clean.core.parseTemplateColor
-import clean.core.parseTemplateColorScope
-import clean.core.templateColorModeOf
 import clean.core.RoundShape
-import clean.core.navOrder
-import clean.core.withMiddle
 import clean.core.Side
 import clean.core.isSidesMarker
 import clean.core.pairHolding
@@ -69,7 +57,6 @@ import clean.core.TodayPlan
 import clean.core.decodeProgram
 import clean.core.encodeProgram
 import androidx.compose.ui.graphics.toArgb
-import clean.core.restNotifCompact
 import clean.core.workoutNotifOn
 import clean.core.workoutNotifText
 import clean.core.todayPlan
@@ -98,29 +85,13 @@ import clean.core.lastTrainedBySide
 import clean.core.muscleSetsBySide
 import clean.core.retainedStrengthBySide
 import kotlinx.coroutines.flow.MutableStateFlow
-import clean.app.ui.theme.DEFAULT_PRESET
-import clean.app.ui.theme.LOOK_KEYS
 import clean.app.ui.theme.Look
-import clean.app.ui.theme.SavedPreset
-import clean.app.ui.theme.decodeSaved
-import clean.app.ui.theme.SAVED_REF
-import clean.app.ui.theme.dayNightChoice
-import clean.app.ui.theme.withSavedLook
-import clean.app.ui.theme.encodeSaved
-import clean.app.ui.theme.lookKeysOf
-import clean.app.ui.theme.resetLookKeys
-import clean.app.ui.theme.Part
-import clean.app.ui.theme.PRESETS
-import clean.core.DEFAULT_DAY_FROM
-import clean.core.DEFAULT_LATITUDE
-import clean.core.DEFAULT_NIGHT_FROM
-import clean.core.SWITCH_PHONE
-import clean.core.SWITCH_TIMES
-import clean.core.dayWindow
-import clean.core.isDaytime
-import clean.core.parseClock
 import clean.app.ui.theme.resolveLook
-import clean.app.ui.theme.monoSettingsOf
+import clean.core.LOOK_ACCENT_KEY
+import clean.core.LOOK_BLACK_KEY
+import clean.core.LOOK_THEMES
+import clean.core.LOOK_THEME_KEY
+import clean.core.migrateLook
 import android.app.Application
 import android.content.pm.ApplicationInfo
 import androidx.compose.runtime.getValue
@@ -420,14 +391,8 @@ sealed interface Screen {
     data object Body : Screen
     /** The measurements: BMI, the files and a new one. */
     data object Measurements : Screen
-    /** Which cards Home shows and in what order. */
-    data object EditHome : Screen
-    /** Which cards Profile shows and in what order. */
-    data object EditProfile : Screen
-    /** The tab bar: the tab names and the order of the four outer tabs. */
-    data object Navigation : Screen
-    /** Which launcher shortcuts the app icon offers, and their order. */
-    data object Shortcuts : Screen
+    /** The profile, over whatever page was open: reached from the round initial button on Home. */
+    data object Profile : Screen
     /** Progress photos, a timeline; [Photo] is one full screen among those of [pose] (all when null), [PhotoCompare] two side by side. */
     data object Photos : Screen
     data class Photo(val name: String, val pose: Pose?) : Screen
@@ -443,11 +408,8 @@ fun Screen.renamedExercise(from: String, to: String): Screen = when {
     else -> this
 }
 
-enum class Tab(val label: String) { Home("Home"), Progress("Progress"), Workout("Workout"), Exercises("Exercises"), Profile("Profile") }
-
-/** The five tabs in the order the bar and the pager lay them out: the stored order of the outer four (kv `nav.order`), Workout third. */
-fun tabOrderOf(stored: String?): List<Tab> =
-    withMiddle(navOrder(stored).map { name -> Tab.entries.first { it.name.lowercase() == name } }, Tab.Workout)
+/** The swipeable tabs, in the order the bar and the pager lay them out. Exercises is the Library. Workout (the plus button's sheet) and Profile (a page) are not tabs. */
+enum class Tab(val label: String) { Home("Home"), Progress("Progress"), Exercises("Library") }
 
 /** Whether Back goes to Home rather than leaving the app: no page is open and the tab on show is not Home. */
 fun backGoesHome(noPage: Boolean, tab: Tab): Boolean = noPage && tab != Tab.Home
@@ -495,102 +457,20 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
     val profile: StateFlow<Profile?> = combine(profiles, activeId) { all, id -> all.firstOrNull { it.id == id } }.state(null)
     /** Whether the phone is in dark mode, set by MainActivity; read by the look when "Theme" is System. */
     val systemDark = MutableStateFlow(false)
-    /** The minute of the clock, so that Day & night can flip while the app is open. */
-    private val minuteTicks: Flow<Long> = flow {
-        while (true) {
-            val now = System.currentTimeMillis()
-            emit(now / 60_000)
-            delay(60_000 - now % 60_000)
-        }
-    }
-    /** The preset to draw now: the chosen one, or for Day & night the day or night choice by its rule (a built-in id or `saved:<name>`). */
-    private fun presetNow(o: Map<String, String>, systemDark: Boolean, minute: Long): String {
-        val chosen = o["theme.preset"] ?: DEFAULT_PRESET
-        if (chosen != "daynight") return chosen
-        val saved = decodeSaved(o["theme.saved"])
-        val day = dayNightChoice(o["theme.day"], saved, "light")
-        val night = dayNightChoice(o["theme.night"], saved, "dark")
-        val rule = o["theme.switch"] ?: SWITCH_TIMES
-        if (rule == SWITCH_PHONE) return if (systemDark) night else day
-        val zone = java.time.ZoneId.systemDefault()
-        val at = java.time.Instant.ofEpochSecond(minute * 60).atZone(zone)
-        val (from, to) = dayWindow(
-            rule, at.toLocalDate(), o["theme.lat"]?.toDoubleOrNull()?.coerceIn(-90.0, 90.0) ?: DEFAULT_LATITUDE, at.offset.totalSeconds / 60,
-            parseClock(o["theme.dayFrom"]) ?: DEFAULT_DAY_FROM, parseClock(o["theme.nightFrom"]) ?: DEFAULT_NIGHT_FROM,
-        )
-        return if (isDaytime(at.hour * 60 + at.minute, from, to)) day else night
-    }
-    /** The look [o] makes with [preset] as its base: its mixes and the older single options as overrides. */
-    private fun lookOf(o: Map<String, String>, preset: String, system: Boolean): Look = resolveLook(
-        preset,
-        Part.entries.mapNotNull { part -> o["theme.mix.${part.key}"]?.let { part to it } }.toMap(),
-        accentOverride = o["accent"], scaleOverride = o["palette"], modeOverride = o["theme"], backgroundOverride = o["background"], systemDark = system,
-        iconAccentOverride = o["theme.iconAccent"], mono = monoSettingsOf(o), colourBlindSafe = o["theme.cbsafe"] == "on",
-    )
-    /** The look (`theme.preset` with its `theme.mix.*` parts, the older accent / palette / background / theme options as overrides). A preset is AMOLED, the app's own look, until another is chosen. Day & night on a saved look draws that look exactly, as if it were chosen. */
-    val look: StateFlow<Look> = combine(kv, systemDark, minuteTicks) { o, system, minute ->
-        val now = presetNow(o, system, minute)
-        val saved = if (now.startsWith(SAVED_REF)) decodeSaved(o["theme.saved"]).firstOrNull { it.name == now.removePrefix(SAVED_REF) } else null
-        if (saved == null) lookOf(o, now, system)
-        else withSavedLook(o, saved).let { lookOf(it, it["theme.preset"] ?: DEFAULT_PRESET, system) }
-    }.distinctUntilChanged().state(resolveLook(DEFAULT_PRESET))
-    /** The chip chosen on the Appearance page: a preset, or `daynight`. */
-    val presetChoice: StateFlow<String> = kv.map { it["theme.preset"] ?: DEFAULT_PRESET }.distinctUntilChanged().state(DEFAULT_PRESET)
-
-    /** The colour scale's name: the user's choice of palette, else the preset's. */
-    val palette: StateFlow<String> = look.map { it.scaleName }.distinctUntilChanged().state(PALETTES.keys.first())
-
-    /** The mode choice shown in Settings: what was set, else the mode the preset is in. */
-    val theme: StateFlow<String> = combine(kv, look) { o, l -> o["theme"] ?: if (l.dark) "Dark" else "Light" }.distinctUntilChanged().state("Dark")
-
-    /** Picks a preset as a whole: every part swapped in and every older override is cleared. */
-    fun choosePreset(id: String) = viewModelScope.launch {
-        dao.put(Kv("theme.preset", id))
-        dao.removePrefix("theme.mix.")
-        for (key in listOf("accent", "palette", "background", "theme", "theme.iconAccent")) dao.remove(key)
-    }
-
-    /** Puts the look back exactly as [keys]: every key that makes up the look is cleared first, so nothing of the old one is left over. */
-    fun applyLook(keys: Map<String, String>) = viewModelScope.launch {
-        dao.removePrefix("theme.mix.")
-        for (key in LOOK_KEYS) dao.remove(key)
-        for ((key, value) in keys) dao.put(Kv(key, value))
-    }
-
     /**
-     * Back to the chosen preset's own look (not the app's default, 2026-10-16): every mix, override and Mono slider is cleared; the preset,
-     * and for Day & night its day and night presets and switch, stay. Undo puts the old look back.
+     * The look (1.1.0): Dark, Light or Phone (kv `look.theme`, default dark), the Pure black switch (`look.black`, Dark only, default off)
+     * and one accent of six (`look.accent`, default Blue), with `theme.cbsafe` for the colour-blind safe set. The older keys were turned
+     * into these once at start-up (`migrateLook`) and are ignored.
      */
-    fun resetLook() {
-        val before = lookKeysOf(kv.value)
-        applyLook(resetLookKeys(before))
-        say("Look reset to the preset") { applyLook(before) }
-    }
+    val look: StateFlow<Look> = combine(kv, systemDark) { o, system ->
+        resolveLook(o[LOOK_THEME_KEY] ?: "dark", o[LOOK_BLACK_KEY] == "on", o[LOOK_ACCENT_KEY] ?: "Blue", system, o["theme.cbsafe"] == "on")
+    }.distinctUntilChanged().state(resolveLook())
 
-    /** The looks the user saved (kv `theme.saved`, for the whole app). */
-    val savedPresets: StateFlow<List<SavedPreset>> = kv.map { decodeSaved(it["theme.saved"]) }.distinctUntilChanged().state(emptyList())
-    private fun storeSaved(list: List<SavedPreset>) = setOption("theme.saved", if (list.isEmpty()) null else encodeSaved(list))
-
-    /** Saves the look as it is now under [name]; an existing preset of that name is replaced. */
-    fun saveLook(name: String) = storeSaved(savedPresets.value.filter { it.name != name } + SavedPreset(name, lookKeysOf(kv.value)))
-    /** Renames a saved look; Day & night keeps following it under the new name. */
-    fun renameSaved(preset: SavedPreset, name: String) {
-        storeSaved(savedPresets.value.map { if (it == preset) it.copy(name = name) else it })
-        for (key in listOf("theme.day", "theme.night")) if (kv.value[key] == SAVED_REF + preset.name) setOption(key, SAVED_REF + name)
-    }
-    fun deleteSaved(preset: SavedPreset) {
-        val before = savedPresets.value
-        storeSaved(before - preset)
-        say("Deleted ${preset.name}") { storeSaved(before) }
-    }
+    /** The stored theme choice: `dark`, `light` or `phone`. */
+    val theme: StateFlow<String> = kv.map { o -> o[LOOK_THEME_KEY]?.takeIf { it in LOOK_THEMES } ?: "dark" }.distinctUntilChanged().state("dark")
 
     // Look and feel, and the auto-fill preference: small values kept under their own keys.
-    val accent: StateFlow<String> = kv.map { it["accent"] ?: "Blue" }.state("Blue")
-    /** The dark theme's background: `Black`, `Dark grey`, or a colour of the user's own. */
-    val background: StateFlow<String> = kv.map { it["background"] ?: "Black" }.state("Black")
     val textSize: StateFlow<String> = kv.map { it["textSize"] ?: "Medium" }.state("Medium")
-    /** An imported font as `path|name`, or null for the default. */
-    val font: StateFlow<String?> = kv.map { it["font"] }.state(null)
     /** How many working sets and drop sets "Auto-fill sets" lays out. */
     val auto: StateFlow<Triple<Int, Int, Int>> = kv.map {
         Triple(it["auto.sets"]?.toIntOrNull() ?: 2, it["auto.drops"]?.toIntOrNull() ?: 1, it["auto.warm"]?.toIntOrNull() ?: 1)
@@ -605,12 +485,10 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
             factorRpe = it["onerm.rpe"] == "on",
         )
     }.distinctUntilChanged().state(OneRm.DEFAULT)
-    /** The tab an exercise's page opens on when it is reached from a workout in progress (History unless changed). */
-    val workoutExerciseTab: StateFlow<Int> = kv.map { it["workout.exerciseTab"]?.toIntOrNull() ?: 1 }.state(1)
 
     /** The chart being shown full screen. */
     var fullChart by mutableStateOf<FullChart?>(null)
-    /** Set by Settings to have the Workout tab open the template file picker. */
+    /** Set by Settings to have the Workout sheet open the template file picker. */
     var importTemplatesNow by mutableStateOf(false)
     /** Set by the empty Profile card to have Settings open the file picker for an import. */
     var importNow by mutableStateOf(false)
@@ -646,35 +524,6 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
     val templates: StateFlow<List<Template>> = perProfile(emptyList()) { id ->
         dao.templates(id).map { list -> list.mapNotNull { t -> runCatching { Template(t.id, t.name, Template.blocksOf(JSONArray(t.blocks)), t.folder) }.getOrNull() } }.flowOn(Dispatchers.Default)
     }.state(emptyList())
-
-    /** How charts draw their figures (Settings, Appearance, Charts). */
-    val chartStyle: StateFlow<ChartStyle> = kv.map { chartStyleOf(it["chart.style"]) }.distinctUntilChanged().state(ChartStyle.LINE)
-
-    /** The profile's template colours: the mode, and the colour each template shows (see `TemplateColors.kt`). */
-    val templateColors: StateFlow<TemplateColors> = combine(kv, templates, activeId) { o, list, id -> TemplateColors.of(o, list, id) }.distinctUntilChanged().state(TemplateColors.OFF)
-
-    /** Sets the colour of a template by hand: an index into the ten, or null for none. Stored under the active profile; Random leaves a "none" alone. */
-    fun setTemplateColor(templateId: Long, index: Int?) = viewModelScope.launch {
-        val profile = activeId.value ?: return@launch
-        dao.put(Kv("tpl.color:$profile:$templateId", encodeTemplateColor(index ?: NO_TEMPLATE_COLOR)))
-    }
-
-    init {
-        // Random gives a colour to each template in scope that has none yet, once, and the kv keeps it; nothing is rewritten while they stay.
-        viewModelScope.launch {
-            combine(kv, templates, activeId) { o, list, id -> Triple(o, list, id) }.collect { (o, list, id) ->
-                if (id == null || list.isEmpty() || templateColorModeOf(o["tpl.colors:$id"]) != TemplateColorMode.RANDOM) return@collect
-                val stored = list.mapNotNull { t -> parseTemplateColor(o["tpl.color:$id:${t.id}"])?.let { t.id to it } }.toMap()
-                val now = look.value
-                val accent = if (now.dark) now.accent.first else now.accent.second
-                val given = assignTemplateColors(
-                    list.map { it.id to it.folder }, stored, parseTemplateColorScope(o["tpl.colors.scope:$id"]),
-                    nearestToAccent(hueOfRgb(accent.red.toDouble(), accent.green.toDouble(), accent.blue.toDouble())),
-                )
-                for ((templateId, color) in given) dao.put(Kv("tpl.color:$id:$templateId", encodeTemplateColor(color)))
-            }
-        }
-    }
 
     /** The bodyweight log, for the real load of bodyweight and assisted lifts. */
     val bodyweights: StateFlow<Bodyweights> = measurements.map { all ->
@@ -988,11 +837,23 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
     }
 
     /** A line shown for a moment at the top of the screen. */
-    class Notice(val text: String)
+    class Notice(val text: String, val action: String? = null, val onAction: (() -> Unit)? = null)
     var notice by mutableStateOf<Notice?>(null)
     var message: String?
         get() = notice?.text
         set(value) { notice = value?.let { Notice(it) } }
+
+    /** A finished workout's toast (B8): "Push saved" at once, then "Push saved · 3 PRs" when the records are worked out; View opens the workout. */
+    fun saidSaved(name: String, date: String) {
+        val first = Notice("$name saved", "View") { open(Screen.WorkoutDetail(date)) }
+        notice = first
+        viewModelScope.launch {
+            val workout = kotlinx.coroutines.withTimeoutOrNull(5000) { workouts.first { list -> list.any { it.date == date } } }?.firstOrNull { it.date == date } ?: return@launch
+            val kinds = kotlinx.coroutines.withTimeoutOrNull(2000) { prs.first { date in it } }?.get(date).orEmpty()
+            val count = clean.core.recordCount(workout, kinds)
+            if (count > 0 && notice === first) notice = Notice("$name saved · ${shortNumber(count)} PR${if (count == 1.0) "" else "s"}", "View", first.onAction)
+        }
+    }
 
     /** What can still be taken back, shown in the one Undo bar, and the clock time that chance ends ([UNDO_MILLIS] after the last step). */
     var undos by mutableStateOf<Undos?>(null)
@@ -1026,7 +887,13 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
 
     /** The page of Settings to open on (set by whatever sends the user there, read once when Settings opens). */
     var settingsPage: String? = null
+    /** Whether the Profile page shows its edit dialog (name, units, height, profiles). */
+    var profileEdit by mutableStateOf(false)
     var clash by mutableStateOf<Clash?>(null)
+    /** The item held for its menu (B5), if any. */
+    val holds = HoldHost()
+    /** Each tab's list keeps where it was scrolled to across tab switches and page round trips (C3). */
+    val tabLists: Map<Tab, androidx.compose.foundation.lazy.LazyListState> = Tab.entries.associateWith { androidx.compose.foundation.lazy.LazyListState() }
     var templateOffer by mutableStateOf<TemplateOffer?>(null)
 
     // Declared before init, which starts the job that reads it.
@@ -1085,8 +952,21 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
         }
     }
 
+    /**
+     * Once at start-up, before the first page is drawn: the look of an older version becomes the 1.1.0 one (`migrateLook`, idempotent),
+     * and an imported font file left in the app's folder is deleted (the font is Inter everywhere now; the old `font` option is ignored).
+     */
+    private suspend fun migrateLookAndFont() {
+        migrateLook(dao.kv().first().associate { it.key to it.value })?.forEach { (key, value) -> dao.put(Kv(key, value)) }
+        withContext(Dispatchers.IO) {
+            runCatching { getApplication<Application>().filesDir.listFiles { f -> f.name.startsWith("font-") }?.forEach { it.delete() } }
+        }
+        dao.remove("font")
+    }
+
     init {
         viewModelScope.launch {
+            runCatching { migrateLookAndFont() }
             val id = activeId.first { it != null } ?: return@launch
             // Only counted here; the lists themselves arrive through the flows, which are then waited for.
             if (dao.rowCount(id) > 0) workouts.first { it.isNotEmpty() }
@@ -1111,21 +991,6 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
         // As the first page is shown after ten seconds at the most (MainActivity), the figures waiting for it start then at the latest.
         viewModelScope.launch { delay(10_000); firstPageDone.value = true }
         viewModelScope.launch {
-            // The launcher icon follows the look: one alias is enabled at a time (IconAliases), switched only when the choice changes.
-            snapshotFlow { loaded }.first { it }
-            look.map { it.icon to it.iconAccent }.distinctUntilChanged().collect { (tile, accent) ->
-                val wanted = IconAliases.key(tile, accent)
-                if ((dao.get("theme.iconApplied") ?: IconAliases.DEFAULT) != wanted) {
-                    val applied = dao.get("theme.iconApplied")
-                    withContext(Dispatchers.IO) { IconAliases.switch(getApplication(), wanted, applied) }
-                    dao.put(Kv("theme.iconApplied", wanted))
-                    // Android drops the dynamic shortcuts when the launcher activity changes; they are set again once it has.
-                    delay(2000)
-                    refreshWidgets(getApplication())
-                }
-            }
-        }
-        viewModelScope.launch {
             // The Today widget is drawn in the look's colours; they are kept (kv `widget.colors`) for a redraw with the app gone, and the widgets are redrawn when they change.
             snapshotFlow { loaded }.first { it }
             look.map { l ->
@@ -1137,10 +1002,6 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
                     refreshWidgets(getApplication())
                 }
             }
-        }
-        viewModelScope.launch {
-            // Presets arrived with AMOLED as the look everyone already had; the older accent, background, palette and theme options stay as they are and now act as overrides of it.
-            if (dao.get("theme.preset") == null) dao.put(Kv("theme.preset", DEFAULT_PRESET))
         }
         viewModelScope.launch {
             // The three options that used to be global belong to the profile that was in use when they were written.
@@ -1242,8 +1103,17 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
     /** Per page just pushed: whether its first rows still settle in (a page that grew out of a card does not). */
     internal val settles = HashMap<String, SettleState>()
 
+    /** Whether the Workout sheet (the plus button's "Start a workout") is open over the current page. */
+    var workoutSheet by mutableStateOf(false)
+
+    /** Raises the Workout sheet; with a workout running there is nothing to start, so it goes back to that workout. */
+    fun openWorkoutSheet() {
+        if (draft != null) resumeWorkout() else workoutSheet = true
+    }
+
     fun open(screen: Screen) {
-        val key = pressedCard?.takeIf { screen != Screen.EditHome && screen != Screen.EditProfile && (screen != Screen.Active || it == BANNER_CARD) }
+        workoutSheet = false
+        val key = pressedCard?.takeIf { screen != Screen.Active }
         if (key != null) cardOf[screen.toString()] = key else cardOf.remove(screen.toString())
         val under = stack.lastOrNull()
         if (key != null && under != null) cardPage[screen.toString()] = under.toString() else cardPage.remove(screen.toString())
@@ -1251,8 +1121,6 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
         stack.add(screen)
     }
     fun back() { stack.removeLastOrNull() }
-    /** The card Arrange Home or Arrange profile should open on and where its top was on screen (px from the window's top), so the page keeps the place the list was scrolled to; taken once by the arrange page. */
-    var arrangeAnchor: Pair<String, Float>? = null
 
     // --- Profiles ---
 
@@ -1466,7 +1334,8 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
     private var restJob: Job? = null
     val restDefault: StateFlow<Int> = kv.map { it["rest.seconds"]?.toIntOrNull() ?: 120 }.state(120)
     /** Where the "workout in progress" bar shows: `Everywhere`, `Main tabs` or `Off`. */
-    val bannerScope: StateFlow<String> = kv.map { it["banner"] ?: "Everywhere" }.state("Everywhere")
+    /** Whether the Current split switch is on (kv `split.on`, absent = off): Up next then rotates through the Current split folder. */
+    val splitOn: StateFlow<Boolean> = kv.map { it["split.on"] == "on" }.distinctUntilChanged().state(false)
 
     /**
      * The rest after a set of [exercise]: the exercise's own length if it has one (off means off for
@@ -1532,7 +1401,7 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
                 if (alertsHere() && restEndFeedback().vibrate) Feedback.pulse(if (left == 1) 600 else 150)
                 delay(1000)
             }
-            if (alertsHere() && restEndFeedback().sound) Feedback.bell(RestTone.of(options.value["rest.tone"]))
+            if (alertsHere() && restEndFeedback().sound) Feedback.bell(RestTone.Deep)
             // Any alarm set for a rest that ends while the app is behind is left to ring; it is cancelled when the app returns.
             restEnd = null
             storeRest()
@@ -1557,7 +1426,7 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
     private fun syncAlerts() {
         val end = restEnd
         val app = getApplication<Application>()
-        if (!started && end != null && options.value["rest.background"] == "on") RestAlert.schedule(app, end, restKey(), restTotal, draft?.let { nextSetOf(it) }?.words(), restNotifCompact(options.value["rest.notif"])) else RestAlert.cancel(app)
+        if (!started && end != null && options.value["rest.background"] == "on") RestAlert.schedule(app, end, restKey(), restTotal, draft?.let { nextSetOf(it) }?.words()) else RestAlert.cancel(app)
         syncWorkoutNotice()
     }
 
@@ -1615,7 +1484,7 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
         val left = if (target == null) 0L else begun + target * 1000L - System.currentTimeMillis()
         stopwatchBell = if (left <= 0) null else viewModelScope.launch {
             delay(left)
-            Feedback.bell(RestTone.of(options.value["rest.tone"]))
+            Feedback.bell(RestTone.Deep)
         }
     }
 
@@ -2145,6 +2014,9 @@ class AppModel(app: Application, private val saved: SavedStateHandle) : AndroidV
             action.startsWith("tab:") -> when (val name = action.substringAfter(':').lowercase()) {
                 "history" -> openHistory(keepTab = false)
                 "body" -> openBody(keepTab = false)
+                "workout" -> openWorkoutSheet()
+                "profile" -> open(Screen.Profile)
+                "library" -> tab = Tab.Exercises
                 else -> Tab.entries.firstOrNull { it.name.equals(name, ignoreCase = true) }?.let { tab = it }
             }
             action.startsWith("templateName:") -> {

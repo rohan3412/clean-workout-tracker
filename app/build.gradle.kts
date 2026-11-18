@@ -9,7 +9,7 @@ plugins {
 
 // The app is offline (see README.md): the merged manifest, libraries included, must never ask for the INTERNET permission.
 // Raise by one for every APK handed out; each split APK's own code is made from it in onVariants below.
-val VERSION_CODE = 5
+val VERSION_CODE = 6
 
 // The ABIs that get their own APK, with the digit each adds to the versionCode (see onVariants below).
 val ABI_CODES = mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86_64" to 3)
@@ -53,7 +53,7 @@ android {
         minSdk = 26
         targetSdk = 37
         versionCode = VERSION_CODE
-        versionName = "1.0.4"
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -119,6 +119,8 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.core)
     // Writing workouts and weigh-ins to Health Connect, which is on the phone; it brings no network access.
     implementation(libs.androidx.health.connect)
+    // Real blur behind the floating glass (Android 12+); Apache 2.0, no network access.
+    implementation(libs.haze)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

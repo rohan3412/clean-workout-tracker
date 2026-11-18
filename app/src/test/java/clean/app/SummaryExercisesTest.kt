@@ -31,6 +31,7 @@ class SummaryExercisesTest {
             val id = repo.createProfile("Test")
             repo.dao.put(Kv("active", id.toString()))
             repo.dao.put(Kv("welcome:$id", "done"))
+            repo.dao.put(Kv("glass.reduce", "on")) // Haze cannot blur in Robolectric: solid glass
             val header = "\"Workout #\";\"Date\";\"Workout Name\";\"Duration (sec)\";\"Exercise Name\";\"Set Order\";\"Weight (kg)\";\"Reps\";\"RPE\";\"Distance (meters)\";\"Seconds\";\"Notes\";\"Workout Notes\""
             val rows = listOf(
                 "\"1\";\"$date\";\"Push\";\"3600\";\"Chest Fly (Machine)\";\"1\";\"70.0\";\"8\";\"\";\"\";\"\";\"\";\"\"",
@@ -60,6 +61,7 @@ class SummaryExercisesTest {
             val id = repo.createProfile("Test")
             repo.dao.put(Kv("active", id.toString()))
             repo.dao.put(Kv("welcome:$id", "done"))
+            repo.dao.put(Kv("glass.reduce", "on")) // Haze cannot blur in Robolectric: solid glass
             val header = "\"Workout #\";\"Date\";\"Workout Name\";\"Duration (sec)\";\"Exercise Name\";\"Set Order\";\"Weight (kg)\";\"Reps\";\"RPE\";\"Distance (meters)\";\"Seconds\";\"Notes\";\"Workout Notes\""
             val rows = listOf(
                 "\"1\";\"$date\";\"Push\";\"3600\";\"Bench Press (Barbell)\";\"W\";\"60.0\";\"5\";\"\";\"\";\"\";\"\";\"\"",

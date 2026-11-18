@@ -23,7 +23,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import clean.app.ui.theme.numbers
 import clean.core.LoadType
 import clean.core.WeightGoal
 import clean.core.exerciseGoalProgress
@@ -111,7 +110,7 @@ internal fun GoalLine(row: GoalRow) {
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(row.name, Modifier.weight(1f), maxLines = 1)
-            Text(row.percent, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall.numbers())
+            Text(row.percent, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
         LinearProgressIndicator(
             progress = { row.fraction.toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().height(6.dp),

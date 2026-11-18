@@ -41,8 +41,8 @@ fun encodeScreen(screen: Screen): String = when (screen) {
 
 private val OBJECTS: Map<String, Screen> = listOf(
     Screen.Active, Screen.Settings, Screen.ExerciseSetup, Screen.Chart, Screen.Trends, Screen.Bmi, Screen.Trophies, Screen.Program,
-    Screen.PersonalBests, Screen.History, Screen.Body, Screen.Measurements, Screen.EditHome, Screen.EditProfile, Screen.Navigation,
-    Screen.Shortcuts, Screen.Photos, Screen.Correct,
+    Screen.PersonalBests, Screen.History, Screen.Body, Screen.Measurements, Screen.Profile,
+    Screen.Photos, Screen.Correct,
 ).associateBy { it::class.simpleName!! }
 
 fun decodeScreen(text: String): Screen? = runCatching {

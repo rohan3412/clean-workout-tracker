@@ -26,7 +26,7 @@ data class TemplateRef(val id: Long, val name: String, val folder: String)
 /** The template that comes next, why, and whether it was picked from the current split folder. */
 data class NextTemplate(val template: TemplateRef, val reason: String, val fromSplit: Boolean)
 
-private fun agoText(day: String, today: LocalDate): String = when (val days = ChronoUnit.DAYS.between(LocalDate.parse(day), today)) {
+internal fun agoText(day: String, today: LocalDate): String = when (val days = ChronoUnit.DAYS.between(LocalDate.parse(day), today)) {
     0L -> "today"
     1L -> "yesterday"
     else -> "$days days ago"

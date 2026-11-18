@@ -1,6 +1,17 @@
 package clean.app
 
 import androidx.compose.ui.platform.testTag
+import clean.app.ui.theme.PillShape
+import clean.app.ui.theme.SheetTopShape
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
@@ -8,11 +19,14 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.core.createChildTransition
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalWindowInfo
 import clean.app.ui.theme.orange
-import clean.app.ui.theme.numbers
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.BorderStroke
@@ -42,6 +56,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
+import androidx.compose.ui.draw.blur
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.RectangleShape
@@ -49,6 +64,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
@@ -82,6 +98,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
@@ -110,8 +127,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -128,11 +143,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import clean.app.ui.theme.BlackBar
-import clean.app.ui.theme.BlackBarQuiet
 import clean.app.ui.theme.CleanTheme
 import clean.app.ui.theme.LocalLook
-import clean.app.ui.theme.paperGrain
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
@@ -145,7 +157,7 @@ import kotlinx.coroutines.withContext
 /**
  * What the app was opened to do, as an action for [AppModel.widgetAction]: from a widget or a
  * launcher shortcut (the `widget` extra), or from a link in another app (`clean://start`,
- * `clean://start?template=Push`, `clean://weight`, `clean://resume`, `clean://open?tab=history`, `tab=body`, `tab=home`).
+ * `clean://start?template=Push`, `clean://weight`, `clean://resume`, `clean://open?tab=history`, `tab=body`, `tab=home`, `tab=progress`, `tab=library` (or `exercises`), `tab=workout` for the Workout sheet and `tab=profile` for the Profile page).
  */
 private fun actionOf(intent: Intent): String? = intent.getStringExtra("widget")?.takeIf { it.isNotEmpty() }
     ?: intent.data?.takeIf { it.scheme == "clean" }?.let { link ->
@@ -211,11 +223,11 @@ class MainActivity : ComponentActivity() {
             sharedFile = fileOf(intent)
         }
         setContent {
-            // A templates file opened with Clean, or shared to it, goes to the Workout tab's import.
+            // A templates file opened with Clean, or shared to it, goes to the Workout sheet's import.
             LaunchedEffect(sharedFile) {
                 sharedFile?.let {
                     model.stack.clear()
-                    model.tab = Tab.Workout
+                    model.openWorkoutSheet()
                     model.sharedFile = it
                     sharedFile = null
                 }
@@ -231,14 +243,13 @@ class MainActivity : ComponentActivity() {
             val systemDark = isSystemInDarkTheme()
             LaunchedEffect(systemDark) { model.systemDark.value = systemDark }
             val dark = look.dark
-            Motion.speed = look.speed
             Motion.moving = model.flag("ui.motion") && !phoneStill
             // Android is told which theme the app uses, so the screen it shows while the app starts is dark or light to match.
             val loaded = model.loaded
             LaunchedEffect(theme, dark, loaded) {
                 if (loaded && Build.VERSION.SDK_INT >= 31) getSystemService(UiModeManager::class.java)?.setApplicationNightMode(
                     when {
-                        theme == "System" -> UiModeManager.MODE_NIGHT_AUTO
+                        theme == "phone" -> UiModeManager.MODE_NIGHT_AUTO
                         dark -> UiModeManager.MODE_NIGHT_YES
                         else -> UiModeManager.MODE_NIGHT_NO
                     },
@@ -250,8 +261,6 @@ class MainActivity : ComponentActivity() {
                 enableEdgeToEdge(style, style)
             }
             val textSize by model.textSize.collectAsState()
-            val font by model.font.collectAsState()
-            val chartStyle by model.chartStyle.collectAsState()
             val scale = when (textSize) {
                 "Smallest" -> 0.72f
                 "Small" -> 0.8f
@@ -259,8 +268,13 @@ class MainActivity : ComponentActivity() {
                 "Largest" -> 1.12f
                 else -> DEFAULT_TEXT_SCALE
             }
-            CleanTheme(look, scale, font?.substringBefore('|')) {
-                CompositionLocalProvider(LocalMotion provides (model.flag("ui.motion") && !phoneStill), LocalChartStyle provides chartStyle) { Surface(Modifier.fillMaxSize().paperGrain(if (look.sheetPage) 0f else look.texture, look.dark)) { App(model) } }
+            CleanTheme(look, scale) {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                // Glass blurs only on Android 12+, and not with Reduce transparency or the phone's own high-contrast text setting.
+                val solidGlass = model.flag("glass.reduce", false) || android.os.Build.VERSION.SDK_INT < 31 || remember(context) {
+                    try { android.provider.Settings.Secure.getInt(context.contentResolver, "high_text_contrast_enabled", 0) == 1 } catch (e: Exception) { false }
+                }
+                CompositionLocalProvider(LocalMotion provides (model.flag("ui.motion") && !phoneStill), LocalSolidGlass provides solidGlass) { Surface(Modifier.fillMaxSize()) { App(model) } }
             }
         }
     }
@@ -284,30 +298,29 @@ fun App(model: AppModel = viewModel()) {
     BackHandler(enabled = model.stack.isNotEmpty()) { model.back() }
     // On a tab other than Home, Back goes to Home first; on Home it leaves the app.
     BackHandler(enabled = backGoesHome(model.stack.isEmpty(), model.tab)) { model.tab = Tab.Home }
-    val snackbar = remember { SnackbarHostState() }
-    LaunchedEffect(model.notice) {
-        val notice = model.notice ?: return@LaunchedEffect
-        snackbar.showSnackbar(notice.text)
-        if (model.notice === notice) model.notice = null
-    }
+    // The Workout sheet closes first.
+    BackHandler(enabled = model.workoutSheet) { model.workoutSheet = false }
+    val running = model.draft != null
     // The Undo bar goes when its time is up; a further step moves the time on.
     LaunchedEffect(model.undoUntil) {
         if (model.undos == null) return@LaunchedEffect
         delay((model.undoUntil - System.currentTimeMillis()).coerceAtLeast(0))
         model.undoExpired()
     }
-    // The first-run questionnaire is a page of its own: no tabs, no workout banner.
+    // The first-run questionnaire is a page of its own: no tabs, no plus button.
     if (model.welcoming) {
         Box(Modifier.fillMaxSize()) {
             WelcomeScreen(model)
-            SnackbarHost(snackbar, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 56.dp))
+            NoticeToast(model, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 56.dp))
         }
         return
     }
     // Once after an update, over whatever page the app opened on.
     model.whatsNew?.let { WhatsNewPopup(it) { model.closeWhatsNew() } }
     // Every chart can ask for the full screen through this.
-    CompositionLocalProvider(LocalFullChart provides { chart -> model.fullChart = chart; model.open(Screen.Chart) }, LocalSeen provides model.seen) {
+    CompositionLocalProvider(LocalFullChart provides { chart -> model.fullChart = chart; model.open(Screen.Chart) }, LocalSeen provides model.seen, LocalHoldHost provides model.holds) {
+    // A hold ends when the page or the tab changes under it.
+    LaunchedEffect(model.stack.size, model.tab) { model.holds.hold = null }
     val motion = LocalMotion.current
     val cards = remember { CardBounds() }
     val clip = remember { MorphClip() }
@@ -331,7 +344,7 @@ fun App(model: AppModel = viewModel()) {
     val card: String? = remember(onTabs) {
         val key = model.cardKeyOf(if (onTabs) lastBottom[0] else model.stack.firstOrNull())
         val spot = key?.let { cards.onScreen(it, window.width.toFloat(), window.height.toFloat()) }
-        if (!motion || key == null || spot == null || (tabOfCard(key) != model.tab && !key.startsWith("banner:"))) null
+        if (!motion || key == null || spot == null || tabOfCard(key) != model.tab) null
         else { clip.begin(spot, Size(window.width.toFloat(), window.height.toFloat())); key }
     }
     // The card change is under way until its clock has run (and a little over); pages and cards take part in it only until then.
@@ -380,10 +393,22 @@ fun App(model: AppModel = viewModel()) {
         LocalPageForward provides { model.stack.isNotEmpty() }, LocalMorphing provides morphingNow, LocalCardPress provides { key, tap -> model.fromCard(key, tap) },
     ) {
     Box(Modifier.fillMaxSize()) {
+    // The Workout sheet shrinks and dims what is under it (B6).
+    val sheetShown = rememberWorkoutSheetProgress(model, motion)
+    // The sheet blurs what is under it; nothing is recorded for it while it is shut.
+    val sheetHaze = rememberHazeState()
+    val sheetUp by remember { derivedStateOf { model.workoutSheet || sheetShown.value > 0f } }
+    // Any other sheet (a window of its own) shrinks the page a little too (B6); a hold blurs it (B5).
+    val smallSheet by animateFloatAsState(if (SheetDepth.open > 0) 1f else 0f, if (motion) tween(200, easing = FastOutSlowInEasing) else snap(), label = "sheet depth")
+    val blurred = model.holds.hold != null && !LocalSolidGlass.current
+    Box(
+        Modifier.fillMaxSize().graphicsLayer { val k = (1f - 0.07f * sheetShown.value) * (1f - 0.04f * smallSheet); scaleX = k; scaleY = k }
+            .then(if (blurred) Modifier.blur(12.dp) else Modifier).then(if (sheetUp) Modifier.hazeSource(sheetHaze) else Modifier),
+    ) {
         // Every page change but a card opening its page, forward or Back, is the blink: the page left fades out, then the new one fades in, in place (Motion).
         CompositionLocalProvider(LocalPageScope provides tabsScope, LocalPageCard provides null) {
             Box(Modifier.fillMaxSize().graphicsLayer { alpha = tabsAlpha }.then(if (onTabs) Modifier else Modifier.clearAndSetSemantics { }).testTag("page:tabs")) {
-                pages.SaveableStateProvider("tabs") { Box(Modifier.fillMaxSize()) { GrainLayer(); Tabs(model) } }
+                pages.SaveableStateProvider("tabs") { RunningLook(running) { Box(Modifier.fillMaxSize()) { Tabs(model) } } }
             }
         }
         // While a page is open the tabs under it take no touch.
@@ -449,15 +474,15 @@ fun App(model: AppModel = viewModel()) {
             Screen.History -> HistoryScreen(model)
             Screen.Body -> BodyScreen(model)
             Screen.Measurements -> MeasurementsScreen(model)
-            Screen.EditHome -> EditHomeScreen(model)
-            Screen.EditProfile -> EditProfileScreen(model)
-            Screen.Navigation -> NavigationScreen(model)
-            Screen.Shortcuts -> ShortcutsScreen(model)
+            Screen.Profile -> ProfileScreen(model)
             Screen.Photos -> PhotosScreen(model)
             is Screen.Photo -> PhotoScreen(model, screen.name, screen.pose)
             is Screen.PhotoCompare -> PhotoCompareScreen(model, screen.pose)
         } }
-        if (screen == null) Unit else if (screen == Screen.Chart || screen == Screen.EditHome || screen == Screen.EditProfile || screen is Screen.Photo || screen is Screen.PhotoCompare) page() else SheetHost(page)
+        // The running look tints every page but the workout's own.
+        RunningLook(running && screen != Screen.Active) {
+            if (screen != null) page()
+        }
         }
         }
         }
@@ -465,14 +490,11 @@ fun App(model: AppModel = viewModel()) {
         }
         // The container's outline, above everything, in the same coordinates the container is drawn in.
         if (card != null) { CardEdge(); ChartMorphLine(card) } else if (link != null) CardEdge()
-        // On the pages behind the tabs the bar sits at the bottom of the screen; on the tabs it is above the buttons.
-        val bannerScope by model.bannerScope.collectAsState()
-        val top = model.stack.lastOrNull()
-        if (bannerScope == "Everywhere" && top != null && top != Screen.Active && top != Screen.Chart && top !is Screen.Photo && top !is Screen.PhotoCompare) {
-            Box(Modifier.align(Alignment.BottomCenter).navigationBarsPadding()) { WorkoutBanner(model) }
-        }
-        // At the top, clear of the banner and the number pad below; on the workout, under its Finish button and rest clock.
-        SnackbarHost(snackbar, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = if (top == Screen.Active) 56.dp else 0.dp))
+    }
+    RunningLook(running) { WorkoutSheet(model, sheetShown, sheetHaze) }
+    HoldOverlay(model.holds)
+        // At the top, clear of the number pad below; on the workout, under its Finish button and rest clock.
+        NoticeToast(model, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = if (top == Screen.Active) 56.dp else 0.dp))
         UndoBar(model, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = if (top == Screen.Active) 56.dp else 0.dp))
         TemplateOfferDialog(model)
         ClashSheet(model)
@@ -494,7 +516,7 @@ private fun ClashSheet(model: AppModel) {
     }
     val now = nowMillis()
     Sheet({ model.clash = null }) {
-        SheetRow("Resume \"${draft.name} · ${clock((now - draft.startMillis) / 1000)}\"", CleanIcons.Dumbbell) {
+        SheetRow("Resume \"${draft.name} · ${clock((now - draft.startMillis) / 1000)}\"", CleanIcons.DumbbellLine) {
             model.clash = null
             model.resumeWorkout()
         }
@@ -509,42 +531,6 @@ private fun ClashSheet(model: AppModel) {
     }
 }
 
-/** The bar that shows a workout is in progress, with its clock or the rest counting down; a tap goes to it. For the first five minutes it also has Cancel. */
-@Composable
-fun WorkoutBanner(model: AppModel, shape: Shape = cardTopShape(), morph: Boolean = false) {
-    val draft = model.draft ?: return
-    val now = nowMillis()
-    var cancelling by remember { mutableStateOf(false) }
-    val rest = model.restEnd?.let { (it - now) / 1000 }?.takeIf { it > 0 }
-    // The banner docked on the tab bar is a card of the tabs page: the workout grows out of it and shrinks back into it, its name and clock travelling to the page's.
-    CompositionLocalProvider(LocalCardKey provides if (morph) BANNER_CARD else null) {
-    val open = cardTap { model.resumeWorkout() }
-    Surface(
-        color = MaterialTheme.colorScheme.primaryContainer, shape = shape,
-        modifier = Modifier.fillMaxWidth().opensInto(null, MaterialTheme.colorScheme.primaryContainer, square = true).clickable(onClick = open),
-    ) {
-        Column {
-            // Always a finger's height, so the bar does not change size when Cancel goes after five minutes; the clock stays at the right edge.
-            Row(Modifier.heightIn(min = 48.dp).padding(horizontal = Space.l), horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
-                Icon(CleanIcons.Dumbbell, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                MorphText(draft.name, "name", Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (draft.isEarly(now)) DangerButton("Cancel", { cancelling = true }, Modifier.minTouch())
-                MorphText(
-                    androidx.compose.ui.text.AnnotatedString(if (rest != null) "Rest ${clock(rest)}" else clock((now - draft.startMillis) / 1000)), "clock",
-                    style = LocalTextStyle.current.numbers(), fontWeight = FontWeight.SemiBold,
-                )
-            }
-            // The rest draining away along the bottom edge.
-            val end = model.restEnd
-            if (rest != null && end != null && model.restTotal > 0) {
-                Box(Modifier.fillMaxWidth(((end - now) / (model.restTotal * 1000f)).coerceIn(0f, 1f)).height(3.dp).background(MaterialTheme.colorScheme.primary))
-            }
-        }
-    }
-    }
-    if (cancelling) Confirm("Cancel workout?", "Everything entered in this workout is thrown away.", "Discard", { model.cancelWorkout() }) { cancelling = false }
-}
-
 /** The card on one page that opened another, and the page that grew out of it (see the page change in [App]). */
 private class PageLink(val key: String, val page: Screen)
 
@@ -557,32 +543,28 @@ private fun blinkAlpha(t: Float): Float = when {
     else -> (t - Motion.BLINK_OUT_MS) / Motion.BLINK_IN_MS
 }
 
-/** The tab bar: 64 dp tall, floating 8 dp above the bottom with 16 dp at the sides, and docked flat on the bottom edge when a list is scrolled to its end. */
-private val BAR_HEIGHT = 68.dp
+/** The three tabs in the order the bar and the pager lay them out, so a swipe goes the way the bar reads. */
+private val TAB_ORDER = listOf(Tab.Home, Tab.Progress, Tab.Exercises)
+
+/** The tab bar and the plus button beside it: 60 dp tall, floating 8 dp above the bottom with 16 dp at the sides and 8 dp between them. */
+private val BAR_HEIGHT = 60.dp
 private val BAR_GAP = 8.dp
-/** The banner's height in the bar, a little over its 48 dp (the rest drains along its foot). */
-internal val BANNER_ROOM = 52.dp
 
 @Composable
 private fun Tabs(model: AppModel) {
-    val bannerScope by model.bannerScope.collectAsState()
-    val options by model.options.collectAsState()
     val ends = remember { mutableStateMapOf<Tab, Boolean>() }
     val nav = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val banner = bannerScope != "Off" && model.draft != null
-    // The bar and the pager lay the tabs out in the same order, so a swipe goes the way the bar reads.
-    val order = tabOrderOf(options["nav.order"])
-    val orderNow by rememberUpdatedState(order)
-    // Constant whether the bar floats or has settled, so settling never changes what a list can scroll.
-    val inset = BAR_HEIGHT + BAR_GAP + nav + if (banner) BANNER_ROOM else 0.dp
-    Scaffold(containerColor = if (LocalLook.current.sheetPage) ComposeColor.Transparent else MaterialTheme.colorScheme.background, contentWindowInsets = WindowInsets.statusBars) { padding ->
+    val order = TAB_ORDER
+    // Constant whether a workout runs or not, so a list never changes what it can scroll.
+    val inset = BAR_HEIGHT + BAR_GAP + nav
+    Scaffold(containerColor = MaterialTheme.colorScheme.background, contentWindowInsets = WindowInsets.statusBars) { padding ->
         // The tabs lie side by side: a swipe goes to the next one, a tap on the bar glides there.
         val pager = rememberPagerState(order.indexOf(model.tab)) { order.size }
         val motion = LocalMotion.current
         // Where a tap on the bar's blink is, in ms (none at rest): the pager fades out, changes page at the midpoint and fades in, on one clock.
         val blink = remember { Animatable(BLINK_REST) }
         LaunchedEffect(model.tab) {
-            val page = orderNow.indexOf(model.tab)
+            val page = order.indexOf(model.tab)
             if (pager.targetPage == page) return@LaunchedEffect
             if (motion) {
                 // A tap on the bar blinks, near or far, in place. A swipe moves the pager itself, following the finger, and never comes here.
@@ -599,214 +581,203 @@ private fun Tabs(model: AppModel) {
             } else pager.scrollToPage(page)
         }
         // The bar follows the page the swipe is heading for, not the one it has come to rest on, so it moves with the finger.
-        // A new order first puts the pager on the page the current tab now has, so the old index is never read as a swipe.
         LaunchedEffect(order) {
             pager.scrollToPage(order.indexOf(model.tab))
             snapshotFlow { pager.targetPage }.collect { if (model.tab != order[it]) model.tab = order[it] }
         }
         // Once the first tab is up, its neighbours are kept ready, so a swipe does not start by building a page.
         val warm by produceState(false) { delay(800); value = true }
+        // The pages are what the bar and the plus button blur; nothing is recorded while a page covers the tabs.
+        val haze = rememberHazeState()
+        val onTabs = model.stack.isEmpty()
         Box(Modifier.padding(padding).fillMaxSize()) {
-            CompositionLocalProvider(LocalBarEnds provides ends, LocalBarInset provides inset) {
-                HorizontalPager(pager, Modifier.fillMaxSize().graphicsLayer { alpha = blinkAlpha(blink.value) }, beyondViewportPageCount = if (warm) 1 else 0) { page ->
+            CompositionLocalProvider(LocalBarEnds provides ends, LocalBarInset provides inset, LocalHaze provides haze) {
+                HorizontalPager(pager, Modifier.fillMaxSize().graphicsLayer { alpha = blinkAlpha(blink.value) }.then(if (onTabs) Modifier.hazeSource(haze) else Modifier), beyondViewportPageCount = if (warm) 1 else 0) { page ->
                     when (order[page]) {
                         Tab.Home -> HomeTab(model)
                         Tab.Progress -> ProgressTab(model)
-                        Tab.Workout -> WorkoutTab(model)
                         Tab.Exercises -> ExercisesTab(model)
-                        Tab.Profile -> ProfileTab(model)
                     }
                 }
             }
             // The bar belongs to the tabs page: it goes and comes back in the same blink as the page, or under a growing card slides away with it.
             val barOut = LocalBarOut.current
-            // The workout banner growing into the workout stays where it is: the bar is under the growing container anyway, and the banner's own bounds are the container's start.
-            val bannerOpens = LocalMorphCard.current?.startsWith("banner:") == true
             // A card that lies partly behind the bar is drawn only above the bar while it is there (see [MorphClip.barTop]), so what the bar hides stays hidden
             // from the tap on and shows as the bar leaves.
             val clipForBar = LocalMorphClip.current
             val barSpot = remember { floatArrayOf(Float.MAX_VALUE, 0f) }
             val barSlide = with(LocalDensity.current) { 48.dp.toPx() }
-            SideEffect { clipForBar?.barTop = { if (bannerOpens) Float.MAX_VALUE else barSpot[0] + (barOut?.value ?: 0f) * (barSpot[1] + barSlide) } }
-            TabBar(
-                model, order, ends[order[pager.currentPage.coerceIn(order.indices)]] == true, banner, nav,
-                Modifier.align(Alignment.BottomCenter).onGloballyPositioned { barSpot[0] = it.positionInRoot().y; barSpot[1] = it.size.height.toFloat() }.graphicsLayer { translationY = if (bannerOpens) 0f else (barOut?.value ?: 0f) * (size.height + 48.dp.toPx()) },
-                // A swipe moves the pill with the finger; a tap's blink glides it on its own clock.
-                follow = { if (pager.isScrollInProgress && blink.value == BLINK_REST) pager.currentPage + pager.currentPageOffsetFraction else null },
-                morph = true,
-            )
+            SideEffect { clipForBar?.barTop = { barSpot[0] + (barOut?.value ?: 0f) * (barSpot[1] + barSlide) } }
+            Row(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = Space.l).padding(bottom = BAR_GAP + nav)
+                    .onGloballyPositioned { barSpot[0] = it.positionInRoot().y; barSpot[1] = it.size.height.toFloat() }
+                    .graphicsLayer { translationY = (barOut?.value ?: 0f) * (size.height + 48.dp.toPx()) },
+                horizontalArrangement = Arrangement.spacedBy(BAR_GAP), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TabBar(
+                    model, order, Modifier.weight(1f),
+                    // A swipe moves the pill with the finger; a tap's blink glides it on its own clock.
+                    follow = { if (pager.isScrollInProgress && blink.value == BLINK_REST) pager.currentPage + pager.currentPageOffsetFraction else null },
+                )
+                PlusButton(model)
+            }
         }
     }
 }
 
 /**
- * The five tabs as a rounded bar over the page. Every tab shows its word, in one of two styles (the look's tab bar style part,
- * `Look.tabWords`): words only (the selected word in a pill) or an outline icon with its word under it. Workout in the middle is a
- * pill in the accent with its word (it resumes the workout while one is in progress). The order of the four outer ones is [order].
- * With a list at its end ([settled]) the bar loses its margins and its lower corners and lies on the bottom edge. The workout banner, when shown, is docked on top of it.
- * [current] is the tab drawn as selected; Settings' live preview draws the bar with one that is not the app's own, under a layer that takes no touch.
+ * The three tabs as a glass bar over the page: an outline icon with its word under it (the words give way while a workout runs, to
+ * leave the plus button room), the selected tab in a large soft pill (white at 11 % in Dark, black at 7 % in Light). [current] is the
+ * tab drawn as selected; Settings' live preview draws the bar with one that is not the app's own, under a layer that takes no touch.
  */
 @Composable
-internal fun TabBar(
-    model: AppModel, order: List<Tab>, settled: Boolean, banner: Boolean, nav: Dp, modifier: Modifier, current: Tab = model.tab,
-    follow: () -> Float? = { null }, morph: Boolean = false,
-) {
-    val floating = if (settled) 0f else 1f
-    val corner = 24.dp
-    val look = LocalLook.current
-    val black = look.blackTabBar
+internal fun TabBar(model: AppModel, order: List<Tab>, modifier: Modifier, current: Tab = model.tab, follow: () -> Float? = { null }) {
     // One pill glides behind the slots (Motion.pill) from the old tab to the new, its leading edge first, or follows a swipe (follow, in tabs).
     val span = rememberStretch(order.indexOf(current).coerceAtLeast(0), follow)
-    val spot = remember { PillSpot() }
-    val scheme = MaterialTheme.colorScheme
-    val pillColour = if (look.tabWords) (if (black) ComposeColor.White else scheme.secondaryContainer) else (if (black) ComposeColor.White.copy(alpha = 0.14f) else scheme.secondaryContainer)
-    Surface(
-        modifier.fillMaxWidth().padding(horizontal = Space.l * floating).padding(bottom = (BAR_GAP + nav) * floating),
-        shape = RoundedCornerShape(corner * floating),
-        color = if (black) BlackBar else MaterialTheme.colorScheme.surfaceContainer, border = if (black) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    val pillColour = if (LocalLook.current.dark) ComposeColor.White.copy(alpha = 0.11f) else ComposeColor.Black.copy(alpha = 0.07f)
+    val words = model.draft == null
+    Row(
+        modifier.height(BAR_HEIGHT).glass(PillShape).padding(Space.xs)
+            .drawBehind {
+                val s = span()
+                val slot = size.width / order.size
+                val inset = 1.dp.toPx()
+                val left = s.left { it * slot + inset }
+                val right = s.right { (it + 1) * slot - inset }
+                drawRoundRect(pillColour, androidx.compose.ui.geometry.Offset(left, 0f), Size(right - left, size.height), androidx.compose.ui.geometry.CornerRadius(size.height / 2f))
+            },
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column {
-            if (banner) WorkoutBanner(model, RectangleShape, morph)
-            // Five slots of one width, so every word keeps its place and the middle one is the bar's centre.
-            Row(
-                Modifier.fillMaxWidth().height(BAR_HEIGHT).padding(horizontal = Space.xs)
-                    .onGloballyPositioned { spot.rowY = it.positionInRoot().y }
-                    .drawBehind {
-                        val top = spot.boxY - spot.rowY
-                        if (top.isNaN()) return@drawBehind
-                        val s = span()
-                        val slot = size.width / order.size
-                        val inset = if (look.tabWords) Space.xxs.toPx() else (slot - INDICATOR_WIDTH.toPx()) / 2f
-                        val left = s.left { it * slot + inset }
-                        val right = s.right { (it + 1) * slot - inset }
-                        val height = INDICATOR_HEIGHT.toPx()
-                        drawRoundRect(pillColour, androidx.compose.ui.geometry.Offset(left, top), Size(right - left, height), androidx.compose.ui.geometry.CornerRadius(height / 2f))
-                    },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                for ((i, tab) in order.withIndex()) if (tab == Tab.Workout) WorkoutButton(model, current == Tab.Workout) else TabItem(model, tab, current == tab, i, span, spot)
-            }
-            Spacer(Modifier.height(nav * (1f - floating)))
-        }
+        for ((i, tab) in order.withIndex()) TabItem(model, tab, current == tab, i, span, words)
     }
 }
 
-/** Where the slots' own boxes sit, in the window, so the one pill that glides behind them is drawn at the same height. */
-internal class PillSpot {
-    var rowY by androidx.compose.runtime.mutableFloatStateOf(Float.NaN)
-    var boxY by androidx.compose.runtime.mutableFloatStateOf(Float.NaN)
-}
-
-/** The pill behind a tab's icon (Material 3's active indicator) or its word. */
-private val INDICATOR_WIDTH = 56.dp
-private val INDICATOR_HEIGHT = 32.dp
-/** The middle tab's larger pill (round 7: "make the middle workouts button bigger"); it holds the word "Workout". */
-private val MIDDLE_WIDTH = 68.dp
-private val MIDDLE_HEIGHT = 38.dp
-
-/**
- * One slot of the bar, the same width for every tab, its content centred in the bar's height. Role Tab with the selected state and
- * [spoken] as its name; a hold calls [onLongClick].
- */
-@OptIn(ExperimentalFoundationApi::class)
+/** One slot of the bar, the same width for every tab, its content centred in the bar's height. Role Tab with the selected state and [spoken] as its name. */
 @Composable
-private fun RowScope.TabSlot(
-    selected: Boolean, spoken: String, onClick: () -> Unit, onLongClick: (() -> Unit)?, content: @Composable ColumnScope.(MutableInteractionSource) -> Unit,
-) {
-    val source = remember { MutableInteractionSource() }
-    val haptic = LocalHapticFeedback.current
+private fun RowScope.TabSlot(selected: Boolean, spoken: String, onClick: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        Modifier.weight(1f).fillMaxHeight()
-            .combinedClickable(
-                interactionSource = source, indication = null,
-                onLongClickLabel = if (onLongClick != null) "Arrange tabs" else null,
-                onLongClick = onLongClick?.let { { haptic.performHapticFeedback(HapticFeedbackType.LongPress); it() } },
-                onClick = onClick,
-            )
-            .semantics(mergeDescendants = true) { role = Role.Tab; this.selected = selected; contentDescription = spoken },
+        Modifier.weight(1f).fillMaxHeight().clip(PillShape)
+            .clickable(role = Role.Tab, onClick = onClick)
+            .semantics(mergeDescendants = true) { this.selected = selected; contentDescription = spoken },
         verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
-    ) { content(source) }
+    ) { content() }
 }
 
-/** A tab's word, one line, bolder when selected; spoken by its slot, not by itself. */
+/** One tab: its outline icon (24 dp) and, while there is room, its word. The icon and word change colour as the gliding pill reaches them. */
 @Composable
-private fun TabWord(label: String, tint: ComposeColor, selected: Boolean) {
-    Text(
-        label, Modifier.clearAndSetSemantics { }, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelMedium,
-        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium, color = tint,
-    )
-}
-
-/**
- * One outer tab. Words only: the word, the selected one in a pill (white with dark text on the black bar, the container colour
- * otherwise). Icons and words: an outline icon in a pill that fills when selected, the word under it. A hold opens the Navigation page.
- */
-@Composable
-private fun RowScope.TabItem(model: AppModel, tab: Tab, selected: Boolean, index: Int, span: () -> Span, spot: PillSpot) {
-    val look = LocalLook.current
-    val black = look.blackTabBar
+private fun RowScope.TabItem(model: AppModel, tab: Tab, selected: Boolean, index: Int, span: () -> Span, words: Boolean) {
     val scheme = MaterialTheme.colorScheme
-    val onClick = { model.tab = tab }
-    val hold = { model.open(Screen.Navigation) }
-    // How much of this slot the gliding pill covers: the word or icon changes colour as the pill reaches it, not when the tab is chosen.
     val cover = span().cover(index)
-    val lit = cover > 0.5f
-    fun mix(off: ComposeColor, on: ComposeColor) = androidx.compose.ui.graphics.lerp(off, on, cover)
-    if (look.tabWords) {
-        val tint = if (black) mix(BlackBarQuiet, BlackBar) else mix(scheme.onSurfaceVariant, scheme.onSecondaryContainer)
-        TabSlot(selected, tab.label, onClick, hold) { source ->
-            Box(
-                Modifier.fillMaxWidth().padding(horizontal = Space.xxs).height(INDICATOR_HEIGHT).clip(CircleShape).onGloballyPositioned { spot.boxY = it.positionInRoot().y }.indication(source, LocalIndication.current),
-                contentAlignment = Alignment.Center,
-            ) { TabWord(tab.label, tint, lit) }
-        }
-    } else {
-        val icon = when (tab) {
-            Tab.Home -> CleanIcons.TabHome
-            Tab.Progress -> CleanIcons.TabProgress
-            Tab.Exercises -> CleanIcons.TabList
-            else -> CleanIcons.TabPerson
-        }
-        val tint = if (black) mix(BlackBarQuiet, ComposeColor.White) else mix(scheme.onSurfaceVariant, scheme.onSecondaryContainer)
-        val wordTint = if (black) mix(BlackBarQuiet, ComposeColor.White) else mix(scheme.onSurfaceVariant, scheme.onSurface)
-        TabSlot(selected, tab.label, onClick, hold) { source ->
-            Box(
-                Modifier.size(INDICATOR_WIDTH, INDICATOR_HEIGHT).clip(CircleShape).onGloballyPositioned { spot.boxY = it.positionInRoot().y }.indication(source, LocalIndication.current),
-                contentAlignment = Alignment.Center,
-            ) { Icon(icon, null, Modifier.size(24.dp), tint = tint) }
-            Spacer(Modifier.height(Space.xxs))
-            TabWord(tab.label, wordTint, lit)
-        }
+    val tint = androidx.compose.ui.graphics.lerp(scheme.onSurfaceVariant, scheme.onSurface, cover)
+    val icon = when (tab) {
+        Tab.Home -> CleanIcons.TabHome
+        Tab.Progress -> CleanIcons.TabProgress
+        Tab.Exercises -> CleanIcons.TabList
     }
-}
-
-/**
- * The middle of the bar: the Workout tab, or, with a workout running, the way back into it. A pill in the accent holding the
- * word "Workout", larger than the other slots' pills and centred in the bar in both styles. A tap blinks to the Workout page; a swipe slides it with the finger.
- */
-@Composable
-private fun RowScope.WorkoutButton(model: AppModel, onTab: Boolean) {
-    val draft = model.draft
-    val look = LocalLook.current
-    val motion = LocalMotion.current
-    TabSlot(
-        onTab, if (draft != null) "Resume workout" else "Workout",
-        onClick = { if (draft != null) model.resumeWorkout() else model.tab = Tab.Workout }, onLongClick = null,
-    ) { source ->
-        val down by source.collectIsPressedAsState()
-        val scale by animateFloatAsState(if (down && motion) 0.94f else 1f, Motion.pressNow(), label = "press")
-        Box(
-            Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.fillMaxWidth().padding(horizontal = 1.dp).widthIn(max = MIDDLE_WIDTH).height(MIDDLE_HEIGHT).clip(CircleShape)
-                .background(look.orange)
-                .then(if (onTab) Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
-                .indication(source, LocalIndication.current),
-            contentAlignment = Alignment.Center,
-        ) {
+    TabSlot(selected, tab.label, { model.tab = tab }) {
+        Icon(icon, null, Modifier.size(24.dp), tint = tint)
+        if (words) {
+            Spacer(Modifier.height(Space.xxs))
             Text(
-                "Workout", Modifier.clearAndSetSemantics { }, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold, color = if (look.tabWords) look.orange.readableOn() else MaterialTheme.colorScheme.onPrimary,
+                tab.label, Modifier.clearAndSetSemantics { }, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (cover > 0.5f) FontWeight.Bold else FontWeight.Medium, color = tint,
             )
         }
     }
 }
 
+/**
+ * The round glass button beside the bar, as tall as it: a plus that raises the Workout sheet. With a workout running it is a wider pill
+ * with a pulsing accent dot, the workout's name and its clock (or the rest counting down), and a tap goes back to the workout.
+ */
+@Composable
+private fun PlusButton(model: AppModel) {
+    val draft = model.draft
+    val motion = LocalMotion.current
+    val source = remember { MutableInteractionSource() }
+    val down by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (down && motion) 0.94f else 1f, Motion.pressNow(), label = "press")
+    val ink = MaterialTheme.colorScheme.onSurface
+    // Spoken: what a tap does, with the workout's name and how long it has run.
+    val minutes = draft?.let { (nowMillis() - it.startMillis) / 60_000 }
+    Box(
+        Modifier.graphicsLayer { scaleX = scale; scaleY = scale }.height(BAR_HEIGHT).widthIn(min = BAR_HEIGHT).glass(CircleShape)
+            .clickable(source, LocalIndication.current, role = Role.Button) { if (draft != null) model.resumeWorkout() else model.workoutSheet = true }
+            .semantics { contentDescription = if (draft != null) "Back to workout ${draft.name}, ${plural(minutes?.toInt() ?: 0, "minute")}" else "Start a workout" },
+        contentAlignment = Alignment.Center,
+    ) {
+        // The plus grows into the clock pill and folds back (C8): the glass follows the width of what is inside, and the content crosses over.
+        val last = remember { arrayOfNulls<Draft>(1) }
+        if (draft != null) last[0] = draft
+        AnimatedContent(
+            draft != null,
+            transitionSpec = {
+                if (motion) (fadeIn(Motion.quick()) togetherWith fadeOut(Motion.quick())).using(SizeTransform(clip = false) { _, _ -> Motion.pill() })
+                else EnterTransition.None togetherWith ExitTransition.None
+            },
+            label = "plus",
+        ) { running ->
+            val shown = last[0]
+            if (!running || shown == null) {
+                Box(Modifier.size(BAR_HEIGHT), contentAlignment = Alignment.Center) { Icon(CleanIcons.Add, null, Modifier.size(28.dp), tint = ink) }
+            } else {
+                val now = nowMillis()
+                val rest = model.restEnd?.let { (it - now) / 1000 }?.takeIf { it > 0 }
+                val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(1f, 0.3f, infiniteRepeatable(tween(900, easing = LinearEasing), RepeatMode.Reverse), label = "dot")
+                Row(Modifier.padding(horizontal = Space.l), horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).graphicsLayer { alpha = if (motion) pulse else 1f }.background(LocalLook.current.orange, CircleShape))
+                    if (rest == null) Text(shown.name, Modifier.widthIn(max = 96.dp), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = ink)
+                    Text(
+                        if (rest != null) "Rest ${clock(rest)}" else clock((now - shown.startMillis) / 1000), maxLines = 1, softWrap = false,
+                        style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, color = ink,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** How far the Workout sheet is up, 0 (closed) to 1 (open); it follows [AppModel.workoutSheet]. */
+@Composable
+internal fun rememberWorkoutSheetProgress(model: AppModel, motion: Boolean): androidx.compose.runtime.State<Float> {
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(model.workoutSheet) {
+        val target = if (model.workoutSheet) 1f else 0f
+        if (motion) progress.animateTo(target, tween(280, easing = FastOutSlowInEasing)) else progress.snapTo(target)
+    }
+    return progress.asState()
+}
+
+/**
+ * The Workout sheet (F6): about 90 % of the screen, over the current page, which the app shrinks and dims behind it. Closed by a tap
+ * outside, a swipe down on its top, or Back. What is inside is [WorkoutSheetContent].
+ */
+@Composable
+private fun WorkoutSheet(model: AppModel, shown: androidx.compose.runtime.State<Float>, haze: HazeState) {
+    val open = model.workoutSheet
+    val drag = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(open) { if (open) drag.snapTo(0f) }
+    val p = shown.value
+    if (!open && p <= 0f) return
+    Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier.fillMaxSize().graphicsLayer { alpha = p }.background(ComposeColor.Black.copy(alpha = 0.45f))
+                .clickable(remember { MutableInteractionSource() }, null) { model.workoutSheet = false }.semantics { contentDescription = "Close" },
+        )
+        var height by remember { mutableStateOf(1) }
+        Box(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.9f).onSizeChanged { height = it.height.coerceAtLeast(1) }
+                .graphicsLayer { translationY = (1f - shown.value) * size.height + drag.value }
+                .glass(SheetTopShape, haze).semantics { paneTitle = "Start a workout" }.clickable(remember { MutableInteractionSource() }, null) { },
+        ) {
+            WorkoutSheetContent(
+                model,
+                Modifier.draggable(
+                    rememberDraggableState { d -> scope.launch { drag.snapTo((drag.value + d).coerceAtLeast(0f)) } }, Orientation.Vertical,
+                    onDragStopped = { if (drag.value > height / 5f) model.workoutSheet = false else scope.launch { drag.animateTo(0f, Motion.follow()) } },
+                ),
+            )
+        }
+    }
+}

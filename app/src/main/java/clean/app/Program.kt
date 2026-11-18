@@ -36,6 +36,7 @@ import clean.core.Workout
 import clean.core.fatigueWord
 import clean.core.firstFittingWeek
 import clean.core.nextTemplate
+import clean.core.upNextTemplate
 import clean.core.suggestedWeek
 import clean.core.versionFor
 import clean.core.weekStart
@@ -83,8 +84,8 @@ fun ProgramScreen(model: AppModel) {
             }) { Text("Save") }
         }
     }) { padding ->
-        SettingsFloat(model, Modifier.padding(padding).fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = settingsFloatSpace(model))) {
+        androidx.compose.foundation.layout.Box(Modifier.padding(padding).fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize()) {
             item {
                 Text(
                     "Your week as templates and rest days. A week is on program when every training day was done by a different workout that week, on any day, with about a tenth of its exercises swapped.",
@@ -120,8 +121,8 @@ fun ProgramScreen(model: AppModel) {
 
     picking?.let { slot ->
         Sheet({ picking = null }, weekdayName(slot)) {
-            // The current split first, then the other folders by name, then the templates in none.
-            val groups = templates.groupBy { it.folder }.toSortedMap(compareBy<String> { it.isEmpty() }.thenBy { !it.equals(CURRENT_SPLIT, ignoreCase = true) }.thenBy { it.lowercase() })
+            // The current split first when its switch is on, then the other folders by name, then the templates in none.
+            val groups = templates.groupBy { it.folder }.toSortedMap(compareBy<String> { it.isEmpty() }.thenBy { !(model.splitOn.value && it.equals(CURRENT_SPLIT, ignoreCase = true)) }.thenBy { it.lowercase() })
             for ((folder, list) in groups) {
                 if (groups.size > 1) Caption(folder.ifEmpty { "No folder" }, Modifier.padding(horizontal = Space.xl, vertical = Space.xs))
                 for (t in list) SheetRow(t.name, value = plural(model.snapshotOf(t).exercises.size, "exercise")) {
@@ -171,22 +172,30 @@ fun TodayCard(model: AppModel, templates: List<Template>, workouts: List<Workout
     val today = LocalDate.now()
     val current = plan
 
-    // A workout in progress is what today is about, whatever was planned.
+    // A workout in progress is what today is about, whatever was planned: Up next becomes In progress.
     model.draft?.let { draft ->
-        Section("", hero = true, onClick = { model.resumeWorkout() }) {
+        Section("", onClick = { model.resumeWorkout() }) {
             Caption("In progress")
-            Text(draft.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-            Text(plural(draft.blocks.size, "exercise"), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            MainButton("Resume workout", { model.resumeWorkout() }, Modifier.fillMaxWidth().heightIn(min = 52.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                Text(draft.name, Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text(clock((nowMillis() - draft.startMillis) / 1000), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            val sets = draft.blocks.flatMap { b -> b.items.filterIsInstance<DraftSet>() }
+            val next = nextBlock(draft)?.let { draft.blocks[it].exercise }
+            Text(
+                listOfNotNull("${sets.count { it.done }} of ${plural(sets.size, "set")}", next?.let { "Next: $it" }).joinToString(" · "),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            MainButton("Resume", { model.resumeWorkout() }, Modifier.fillMaxWidth().heightIn(min = 52.dp))
         }
         return
     }
 
     if (current == null) {
-        val next = nextTemplate(templates.map { it.ref() }, workouts, CURRENT_SPLIT, today, skipped)
+        val next = upNextTemplate(templates.map { it.ref() }, workouts, model.splitOn.collectAsState().value, CURRENT_SPLIT, today, skipped)
         val template = next?.let { n -> templates.firstOrNull { it.id == n.template.id } }
         if (next == null || template == null) TodayRest(model, "Quick start", "An empty workout; add exercises as you go.", null)
-        else TodayBody(model, "Up next", template, next.reason.replaceFirstChar { it.uppercase() }, templates.size > 1) { start ->
+        else TodayBody(model, "Up next", template, null, templates.size > 1) { start ->
             if (start) model.start(template) else model.skippedTemplates = skipped + template.id
         }
         return
@@ -199,7 +208,7 @@ fun TodayCard(model: AppModel, templates: List<Template>, workouts: List<Workout
     if (todayDay != null && !current.done && pick != null) {
         val reason = pickReason(pick)
         if (pickTemplate == null) TodayRest(model, "${pick.day.label} (template removed)", reason, null)
-        else TodayBody(model, "Today", pickTemplate, reason, current.candidates.size > 1) { start ->
+        else TodayBody(model, "Up next", pickTemplate, reason, current.candidates.size > 1) { start ->
             if (start) model.start(pickTemplate) else model.skippedTemplates = skipped + pickTemplate.id
         }
         return
@@ -213,23 +222,31 @@ fun TodayCard(model: AppModel, templates: List<Template>, workouts: List<Workout
 }
 
 @Composable
-private fun TodayBody(model: AppModel, caption: String, template: Template, reason: String, canSkip: Boolean, onTap: (start: Boolean) -> Unit) {
-    Section("", hero = true, onClick = { model.open(Screen.TemplateStats(template.id)) }) {
+private fun TodayBody(model: AppModel, caption: String, template: Template, reason: String?, canSkip: Boolean, onTap: (start: Boolean) -> Unit) {
+    // Up next, the one raised card on Home: what is next, when it was last done, and one main button.
+    Section("", onClick = { model.open(Screen.TemplateStats(template.id)) }, hold = {
+        listOf(
+            HoldAction("Open", CleanIcons.Forward) { model.open(Screen.TemplateStats(template.id)) },
+            HoldAction("Start", CleanIcons.Play) { model.start(template) },
+            HoldAction("Edit", CleanIcons.Edit) { model.open(Screen.TemplateEdit(template.id)) },
+        )
+    }) {
         Caption(caption)
-        val colors by model.templateColors.collectAsState()
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            colors.ofId(template.id)?.let { TemplateDot(it, size = 12.dp) }
             MorphText(androidx.compose.ui.text.AnnotatedString(template.name), "title", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         }
         val workouts by model.workouts.collectAsState()
         val estimate = remember(workouts, template.name) { clean.core.templateDurations(workouts)[template.name] }
-        Text(listOfNotNull(reason, plural(template.blocks.size, "exercise"), estimate?.let { clean.core.estimateText(it) }).joinToString(" · "), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val lastDone = remember(workouts, template.name) { workouts.lastOrNull { it.name == template.name }?.let { parseDate(it.date)?.toLocalDate() } }
+        val line = listOfNotNull(
+            lastDone?.let { "Last done ${shortDay(it)}" }, plural(template.blocks.size, "exercise"), estimate?.let { clean.core.estimateText(it).replace("~", "about ") },
+        ).joinToString(" · ")
+        if (reason != null) Text(reason, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(line, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         DeloadHint(model)
         readiness(model, template)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            MainButton("Start workout", { onTap(true) }, Modifier.weight(1f).heightIn(min = 52.dp))
-            if (canSkip) QuietButton("Not this one", { onTap(false) })
-        }
+        MainButton("Start ${template.name}", { onTap(true) }, Modifier.fillMaxWidth().heightIn(min = 52.dp))
+        if (canSkip) QuietButton("Not this one", { onTap(false) }, Modifier.fillMaxWidth())
     }
 }
 
@@ -239,8 +256,8 @@ private fun TodayBody(model: AppModel, caption: String, template: Template, reas
  */
 @Composable
 private fun TodayRest(model: AppModel, head: String, next: String?, template: Template?) {
-    Section("", hero = true, onClick = { if (model.program.value.isEmpty()) model.tab = Tab.Workout else model.open(Screen.Program) }) {
-        Caption("Today")
+    Section("", onClick = { if (model.program.value.isEmpty()) model.openWorkoutSheet() else model.open(Screen.Program) }) {
+        Caption(if (template == null && next == null) "Quick start" else "Today")
         Text(head, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         if (next != null) Text(next, color = MaterialTheme.colorScheme.onSurfaceVariant)
         DeloadHint(model)

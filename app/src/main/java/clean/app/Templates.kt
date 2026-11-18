@@ -1,5 +1,6 @@
 package clean.app
 
+import clean.app.ui.theme.cardShape
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.foundation.shape.CircleShape
@@ -35,6 +36,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import clean.core.upNextTemplate
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -51,7 +58,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
-import clean.core.TemplateColorMode
 import clean.core.SetType
 import clean.core.TemplateBlock
 import clean.core.sameShape
@@ -77,22 +83,32 @@ private fun ago(date: String?): String {
     }
 }
 
+/**
+ * What the Workout sheet holds (F6): "Start a workout" with New template and the sheet's menu, a search over the templates, Quick start,
+ * then every template under its folder, the one Up next would pick marked. A tap on a template opens its page (which has Start); a hold,
+ * or its ⋮, opens what a template's card used to offer. [header] carries the drag that closes the sheet.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun WorkoutTab(model: AppModel) {
+fun WorkoutSheetContent(model: AppModel, header: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val templates by model.templates.collectAsState()
     val workouts by model.workouts.collectAsState()
+    val splitOn by model.splitOn.collectAsState()
+    val plan by model.programToday.collectAsState()
+    val skipped = model.skippedTemplates
     // The last time a workout of each name was done, which is when its template was last used.
     val lastDone = remember(workouts) { workouts.associate { it.name to it.date } }
-    // How long each template usually takes, from its latest sessions.
-    val estimates = remember(workouts) { clean.core.templateDurations(workouts) }
     var menu by remember { mutableStateOf(false) }
     var incoming by remember { mutableStateOf<List<Template>?>(null) }
+    var query by rememberSaveable { mutableStateOf("") }
     val folders = remember(templates) { templates.map { it.folder }.filter { it.isNotEmpty() }.distinct().sortedBy { it.lowercase() } }
-    // Which folders are open, one name per line; "" is the templates in no folder.
-    var openText by model.remembered("openFolders", "\u0000")
-    val openFolders = if (openText == "\u0000") emptySet() else openText.split("\n").toSet()
+    // The program decides first, else the Up next rule (see [upNextTemplate]).
+    val upNextId = remember(plan, templates, workouts, splitOn, skipped) {
+        plan?.candidates?.firstOrNull { it.day.templateId !in skipped }?.day?.templateId?.takeIf { id -> templates.any { it.id == id } }
+            ?: upNextTemplate(templates.map { it.ref() }, workouts, splitOn, CURRENT_SPLIT, LocalDate.now(), skipped)?.template?.id
+    }
 
     val open = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
@@ -128,80 +144,65 @@ fun WorkoutTab(model: AppModel) {
             open.launch(arrayOf("*/*"))
         }
     }
-    val state = rememberLazyListState()
-    BarEnd(Tab.Workout, state)
-    val pinned = pinsTitle()
-    SheetTab({ Title("Workout") }) {
-    LazyColumn(Modifier.fillMaxSize(), state) {
-        if (!pinned) item { Title("Workout") }
-        sheetGap(pinned)
-        item {
-            SectionTitle("Quick start", Modifier.padding(horizontal = Space.l))
-            val label = if (model.draft == null) "Start an empty workout" else "Resume workout"
-            MainButton(label, { model.startWorkout() }, Modifier.fillMaxWidth().padding(Space.l).heightIn(min = 52.dp))
-        }
-        item {
-            Row(Modifier.fillMaxWidth().padding(start = Space.l, end = Space.xs), verticalAlignment = Alignment.CenterVertically) {
-                SectionTitle("Templates (${templates.size})", Modifier.weight(1f))
-                IconButton(onClick = { model.open(Screen.TemplateEdit(null)) }) { Icon(CleanIcons.Add, "New template") }
+
+    Column(Modifier.fillMaxSize()) {
+        Column(header.fillMaxWidth()) {
+            androidx.compose.material3.BottomSheetDefaults.DragHandle(Modifier.align(Alignment.CenterHorizontally).semantics { contentDescription = "Workout sheet handle. Drag down to close"; onClick("Close the workout sheet") { model.workoutSheet = false; true } })
+            Row(Modifier.fillMaxWidth().padding(start = Space.xl, end = Space.xs), verticalAlignment = Alignment.CenterVertically) {
+                Text("Start a workout", Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                TextButton(onClick = { model.open(Screen.TemplateEdit(null)) }) { Text("New template") }
                 IconButton(onClick = { menu = true }) { Icon(CleanIcons.More, "Template options") }
-                if (menu) Sheet({ menu = false }, "Templates") {
-                    SheetRow("Make from past workouts", CleanIcons.History) { menu = false; model.templatesFromHistory() }
-                    SheetRow("Import templates", CleanIcons.Down) { menu = false; open.launch(arrayOf("*/*")) }
-                    SheetRow("Export templates", CleanIcons.Up) { menu = false; save.launch("clean_templates_${LocalDate.now()}.json") }
-                }
             }
         }
-        if (templates.isEmpty()) {
+        if (menu) Sheet({ menu = false }, "Templates") {
+            SheetRow("Make from past workouts", CleanIcons.History) { menu = false; model.templatesFromHistory() }
+            SheetRow("Import templates", CleanIcons.Down) { menu = false; open.launch(arrayOf("*/*")) }
+            SheetRow("Export templates", CleanIcons.Up) { menu = false; save.launch("clean_templates_${LocalDate.now()}.json") }
+        }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = Space.xxl)) {
             item {
-                Section("No templates yet") {
-                    Text("A template is a workout you repeat: its exercises and sets, ready to fill in.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (workouts.isNotEmpty()) {
-                        Text("Strong's export does not carry your templates, but your history does: Clean can make one per workout name, from the latest workout of that name.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        QuietButton("Make from past workouts", { model.templatesFromHistory() })
+                OutlinedTextField(
+                    query, { query = it }, label = { Text("Search templates") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = Space.l, vertical = Space.s),
+                )
+            }
+            item {
+                Column(Modifier.fillMaxWidth().clickable { model.startWorkout() }.padding(horizontal = Space.xl, vertical = Space.m)) {
+                    Text("Quick start, empty", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("An empty workout; add exercises as you go.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (templates.isEmpty()) {
+                item {
+                    Column(Modifier.padding(horizontal = Space.xl, vertical = Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                        SectionTitle("No templates yet")
+                        Text("A template is a workout you repeat: its exercises and sets, ready to fill in.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (workouts.isNotEmpty()) {
+                            Text("Strong's export does not carry your templates, but your history does: Clean can make one per workout name, from the latest workout of that name.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            QuietButton("Make from past workouts", { model.templatesFromHistory() })
+                        }
                     }
                 }
             }
-        }
-        // The three used most recently, then each folder under its name; a folder opens when tapped and stays as it was left.
-        val sorted = templates.sortedByDescending { lastDone[it.name] ?: "" }
-        val recent = sorted.filter { lastDone[it.name] != null }.take(3)
-        if (recent.isNotEmpty() && templates.size > 3) {
-            item { Text("Recent", Modifier.padding(start = Space.l, top = Space.s), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
-            items(recent, key = { "r${it.id}" }) { template -> TemplateCard(model, template, lastDone[template.name], folders, estimates[template.name], "workout:recent:${template.id}") }
-        }
-        val grouped = sorted.groupBy { it.folder }.toSortedMap(compareBy<String> { it.isEmpty() }.thenBy { !it.equals(CURRENT_SPLIT, ignoreCase = true) }.thenBy { it.lowercase() })
-        // The current split is always there, even with nothing in it yet.
-        if (templates.isNotEmpty() && templates.none { it.folder.equals(CURRENT_SPLIT, ignoreCase = true) }) item(key = "split:empty") {
-            Column(Modifier.fillMaxWidth().padding(horizontal = Space.l, vertical = Space.m)) {
-                SectionTitle(CURRENT_SPLIT)
-                Text("Empty. Put the templates you are rotating through here (a template's ⋮, then Folder) and the “Up next” widget goes round them.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val shown = templates.filter { query.isBlank() || it.name.contains(query.trim(), ignoreCase = true) }
+            if (templates.isNotEmpty() && shown.isEmpty()) item { Text("No template is called “${query.trim()}”.", Modifier.padding(horizontal = Space.xl, vertical = Space.m), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            // Each folder under its name; with the Current split switch on, that folder comes first. Without folders there is one list.
+            val grouped = shown.sortedByDescending { lastDone[it.name] ?: "" }.groupBy { it.folder }
+                .toSortedMap(compareBy<String> { it.isEmpty() }.thenBy { !(splitOn && it.equals(CURRENT_SPLIT, ignoreCase = true)) }.thenBy { it.lowercase() })
+            for ((folder, list) in grouped) {
+                item(key = "f:$folder") { SectionTitle(folder.ifEmpty { if (folders.isEmpty()) "Templates" else "No folder" }, Modifier.padding(start = Space.xl, end = Space.xl, top = Space.l)) }
+                items(list, key = { it.id }) { template -> TemplateRow(model, template, lastDone[template.name], folders, template.id == upNextId) }
             }
         }
-        for ((folder, list) in grouped) {
-            // With three templates or fewer and no folders there is nothing to fold away.
-            val plain = folders.isEmpty() && templates.size <= 3
-            val isOpen = plain || folder in openFolders
-            if (!plain) item(key = "f:$folder") {
-                Row(
-                    Modifier.fillMaxWidth().clickable { openText = (if (isOpen) openFolders - folder else openFolders + folder).let { if (it.isEmpty()) "\u0000" else it.joinToString("\n") } }.padding(horizontal = Space.l, vertical = Space.m),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    SectionTitle(folder.ifEmpty { if (folders.isEmpty()) "All templates" else "No folder" }, Modifier.weight(1f))
-                    Text("${list.size}  ${if (isOpen) "▾" else "▸"}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            if (isOpen) items(list, key = { it.id }) { template -> TemplateCard(model, template, lastDone[template.name], folders, estimates[template.name], "workout:template:${template.id}") }
-        }
-        item { BarSpace() }
-    }
     }
 
     incoming?.let { list -> ImportTemplates(model, list, workouts) { incoming = null } }
 }
 
+/** One template in the Workout sheet: its name, when it was last done and, quietly, whether it is Up next. A tap opens its page; a hold or the ⋮ opens its menu. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun TemplateCard(model: AppModel, template: Template, lastDone: String?, folders: List<String>, estimate: Long? = null, key: String? = null) {
+private fun TemplateRow(model: AppModel, template: Template, lastDone: String?, folders: List<String>, upNext: Boolean) {
     val context = LocalContext.current
     var menu by remember { mutableStateOf(false) }
     var moving by remember { mutableStateOf(false) }
@@ -213,9 +214,9 @@ private fun TemplateCard(model: AppModel, template: Template, lastDone: String?,
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                     OutlinedTextField(name, { name = it }, label = { Text("Folder name") }, placeholder = { Text("Push") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    // "Current split" is always on offer: its templates are the ones the Up next widget goes round.
+                    // "Current split" is always on offer: with its switch on in Settings, Up next goes round the templates in it.
                     for (f in (listOf(CURRENT_SPLIT) + folders).distinctBy { it.lowercase() }) Text(f, Modifier.fillMaxWidth().clickable { name = f }.padding(vertical = Space.s), color = MaterialTheme.colorScheme.primary)
-                    Text("The “Up next” widget goes round the templates in $CURRENT_SPLIT.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("With “Current split” switched on in Settings, Up next goes round the templates in $CURRENT_SPLIT.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (template.folder.isNotEmpty()) Text("No folder", Modifier.fillMaxWidth().clickable { name = "" }.padding(vertical = Space.s), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
@@ -224,40 +225,37 @@ private fun TemplateCard(model: AppModel, template: Template, lastDone: String?,
         )
     }
     var deleting by remember { mutableStateOf(false) }
-    var colouring by remember { mutableStateOf(false) }
-    val colors by model.templateColors.collectAsState()
-    if (colouring) TemplateColorSheet(model, template) { colouring = false }
-    // The whole card opens the template's page; nothing inside takes a tap of its own but the menu and Start.
-    CompositionLocalProvider(LocalCardKey provides key) {
-    Section("", onClick = { model.open(Screen.TemplateStats(template.id)) }) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            colors.ofId(template.id)?.let { TemplateDot(it, Modifier.padding(end = Space.s)) }
-            MorphText(androidx.compose.ui.text.AnnotatedString(template.name), "title", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            // Drawn 32 dp wide; its hit area is 48 dp, laid over the neighbours without moving them.
-            Box(Modifier.size(32.dp).reach().clip(CircleShape).clickable { menu = true }, contentAlignment = Alignment.Center) {
-                Icon(CleanIcons.More, "Template options", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (menu) Sheet({ menu = false }, template.name) {
-                SheetRow("Start", CleanIcons.Play) { menu = false; model.start(template) }
-                SheetRow("Edit", CleanIcons.Edit) { menu = false; model.open(Screen.TemplateEdit(template.id)) }
-                SheetRow("Folder", CleanIcons.Folder, value = template.folder.ifEmpty { "None" }) { menu = false; moving = true }
-                if (colors.mode == TemplateColorMode.MANUAL) SheetRow("Colour", value = colors.ofId(template.id)?.let { TEMPLATE_COLOR_NAMES[it] } ?: "None") { menu = false; colouring = true }
-                SheetRow("Share as a file", CleanIcons.Share) { menu = false; shareFile(context, "${template.name}.clean.json", model.templatesFile(listOf(template)).toByteArray(), "application/json") }
-                SheetGap()
-                SheetRow("Delete", CleanIcons.Delete, danger = true) { menu = false; deleting = true }
-            }
+    Row(
+        Modifier.fillMaxWidth()
+            .clickable { model.open(Screen.TemplateStats(template.id)) }
+            .holdMenu(cardShape(), {
+                listOf(
+                    HoldAction("Open", CleanIcons.Forward) { model.open(Screen.TemplateStats(template.id)) },
+                    HoldAction("Start", CleanIcons.Play) { model.start(template) },
+                    HoldAction("Edit", CleanIcons.Edit) { model.open(Screen.TemplateEdit(template.id)) },
+                    HoldAction("Delete", CleanIcons.Delete, danger = true) { deleting = true },
+                )
+            })
+            .padding(start = Space.xl, end = Space.xs).heightIn(min = 56.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f).padding(vertical = Space.s)) {
+            Text(template.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(ago(lastDone), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Column {
-            for (block in template.blocks) {
-                val working = block.sets.count { it != SetType.WARMUP }
-                Text("$working × ${block.exercise}", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(listOfNotNull(ago(lastDone), estimate?.let { clean.core.estimateText(it) }).joinToString(" · "), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            QuietButton("Start", { model.start(template) })
+        if (upNext) Text("Up next", Modifier.padding(horizontal = Space.s), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Drawn 32 dp wide; its hit area is 48 dp, laid over the neighbours without moving them.
+        Box(Modifier.size(32.dp).reach().clip(CircleShape).clickable { menu = true }, contentAlignment = Alignment.Center) {
+            Icon(CleanIcons.More, "Options for ${template.name}", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+    if (menu) Sheet({ menu = false }, template.name) {
+        SheetRow("Start", CleanIcons.Play) { menu = false; model.start(template) }
+        SheetRow("Edit", CleanIcons.Edit) { menu = false; model.open(Screen.TemplateEdit(template.id)) }
+        SheetRow("Folder", CleanIcons.Folder, value = template.folder.ifEmpty { "None" }) { menu = false; moving = true }
+        SheetRow("Share as a file", CleanIcons.Share) { menu = false; shareFile(context, "${template.name}.clean.json", model.templatesFile(listOf(template)).toByteArray(), "application/json") }
+        SheetGap()
+        SheetRow("Delete", CleanIcons.Delete, danger = true) { menu = false; deleting = true }
     }
     if (deleting) Confirm("Delete ${template.name}?", "Only the template goes; workouts already logged from it stay.", "Delete", { model.deleteTemplate(template.id) }) { deleting = false }
 }

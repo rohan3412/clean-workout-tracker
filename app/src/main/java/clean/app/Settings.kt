@@ -25,9 +25,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import clean.app.ui.theme.ACCENTS
+import clean.core.LOOK_ACCENT_KEY
+import clean.core.LOOK_BLACK_KEY
+import clean.core.LOOK_THEMES
+import clean.core.LOOK_THEME_KEY
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.draw.clip
 import android.Manifest
 import android.content.pm.PackageManager
-import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import java.io.File
@@ -60,7 +65,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -79,7 +83,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import clean.app.data.MeasurementImport
-import clean.app.data.Profile
 import clean.app.data.WorkoutImport
 import clean.core.ImportFile
 import clean.core.ImportSource
@@ -91,13 +94,7 @@ import clean.core.exportPlainCsv
 import clean.core.needsUnit
 import clean.core.readImportFile
 import clean.core.OneRmFormula
-import clean.core.ChartStyle
-import clean.core.chartStyleOf
-import clean.core.DEFAULT_REST_HIDE
-import clean.core.REST_HIDE_CHOICES
-import clean.core.REST_PRESET_COUNT
 import clean.core.RestEndFeedback
-import clean.core.parseRestPresets
 import clean.core.restEndFeedback
 import clean.core.SetRange
 import clean.core.estimate1Rm
@@ -113,22 +110,17 @@ import kotlinx.coroutines.withContext
 fun SettingsScreen(model: AppModel) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val profiles by model.profiles.collectAsState()
     val profile by model.profile.collectAsState()
-    val palette by model.palette.collectAsState()
-    val accent by model.accent.collectAsState()
-    val background by model.background.collectAsState()
-    // Which colour the wheel is open for: "accent", "background" or "palette".
+    // Which colour the wheel is open for: only the sticky note's band.
     var wheel by remember { mutableStateOf<String?>(null) }
     var credits by remember { mutableStateOf(false) }
     var datasetCredits by remember { mutableStateOf(false) }
     val textSize by model.textSize.collectAsState()
-    val font by model.font.collectAsState()
+    val theme by model.theme.collectAsState()
+    val look by model.look.collectAsState()
     val auto by model.auto.collectAsState()
     val oneRm by model.oneRm.collectAsState()
     val restDefault by model.restDefault.collectAsState()
-    val bannerScope by model.bannerScope.collectAsState()
-    val exerciseTab by model.workoutExerciseTab.collectAsState()
     val stickyColor by model.stickyColor.collectAsState()
     val saveTemplates = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) scope.launch {
@@ -136,8 +128,6 @@ fun SettingsScreen(model: AppModel) {
             model.message = "Templates exported"
         }
     }
-    var adding by remember { mutableStateOf(false) }
-    var deleting by remember { mutableStateOf<Profile?>(null) }
 
     /** Runs [work] for the active profile and reports anything that goes wrong instead of crashing. */
     fun task(work: suspend (Long) -> Unit) {
@@ -159,6 +149,7 @@ fun SettingsScreen(model: AppModel) {
     val saveBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
         if (uri != null) scope.launch {
             backingUp = true
+            model.message = "Backing up ${plural(model.workouts.value.size, "workout")} and everything else…"
             try {
                 withContext(Dispatchers.IO) { context.contentResolver.openOutputStream(uri, "wt")!!.use { Backup.write(context, it, withAnimations) } }
                 model.message = "Backup saved"
@@ -227,27 +218,8 @@ fun SettingsScreen(model: AppModel) {
             }
         }
     }
-    val pickFont = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch {
-            try {
-                // Copied into the app's own folder, so it keeps working if the original is moved or deleted.
-                val file = File(context.filesDir, "font-${System.currentTimeMillis()}")
-                val bytes = readBytes(context, uri)
-                withContext(Dispatchers.IO) { file.writeBytes(bytes) }
-                if (Typeface.Builder(file).build() == null) {
-                    file.delete()
-                    model.message = "That file is not a font. Pick a .ttf or .otf file."
-                } else {
-                    context.filesDir.listFiles { f -> f.name.startsWith("font-") && f != file }?.forEach { it.delete() }
-                    model.setOption("font", file.path + "|" + (uri.lastPathSegment?.substringAfterLast('/')?.substringAfterLast(':') ?: "Imported font"))
-                }
-            } catch (e: Exception) {
-                model.message = e.message ?: "That did not work"
-            }
-        }
-    }
 
-    // Settings is a short list of headings; each opens its own page of options.
+    // Settings is a short list of four headings; each opens its own page of options.
     var page by remember { mutableStateOf(model.settingsPage.also { model.settingsPage = null }) }
     BackHandler(enabled = page != null) { page = null }
     val motion = LocalMotion.current
@@ -255,11 +227,12 @@ fun SettingsScreen(model: AppModel) {
     // A search over every section; a result opens its page scrolled to that section.
     var query by rememberSaveable { mutableStateOf("") }
     var jump by remember { mutableStateOf<String?>(null) }
+    var restKinds by remember { mutableStateOf(false) }
     Scaffold(containerColor = pageContainer(), topBar = { BackBar(page ?: "Settings", { if (page != null) page = null else model.back() }) }) { padding ->
-        SettingsFloat(model, Modifier.padding(padding).fillMaxSize()) {
         // The list and its pages swap like pages do: into a page is a step in, back to the list is a step out. The outgoing page keeps showing what it showed.
         AnimatedContent(
             page,
+            modifier = Modifier.padding(padding).fillMaxSize(),
             transitionSpec = {
                 Motion.blinkIn(motion) togetherWith Motion.blinkOut(motion)
             },
@@ -281,7 +254,7 @@ fun SettingsScreen(model: AppModel) {
                 listState.scrollToItem(i)
             }
         }
-        LazyColumn(Modifier.fillMaxSize(), listState, contentPadding = PaddingValues(bottom = settingsFloatSpace(model))) {
+        LazyColumn(Modifier.fillMaxSize(), listState) {
             if (page == null) item(key = "search") {
                 OutlinedTextField(
                     query, { query = it }, Modifier.fillMaxWidth().padding(horizontal = Space.l, vertical = Space.s),
@@ -294,7 +267,7 @@ fun SettingsScreen(model: AppModel) {
                 val found = searchSettings(query)
                 if (found.isEmpty()) item(key = "none") { Text("No setting matches “${query.trim()}”.", Modifier.padding(Space.l), color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 items(found, key = { it.key }) { place ->
-                    // Inset like the search box above; LinkRow has no side padding of its own (inside a card the card gives it).
+                    // Inset like the search box above; LinkRow has no side padding of its own.
                     Box(Modifier.padding(horizontal = Space.l)) { LinkRow(place.title, place.page, "") { jump = place.key; query = ""; openPage(place.page) } }
                 }
             }
@@ -302,18 +275,13 @@ fun SettingsScreen(model: AppModel) {
                 items(SETTINGS_PAGES) { (title, about) ->
                     Row(Modifier.settleNext().fillMaxWidth().clickable { openPage(title) }.padding(horizontal = Space.l, vertical = Space.l), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.l)) {
                         val icon = when (title) {
-                            "Profile" -> CleanIcons.Person
-                            "Workout" -> CleanIcons.Dumbbell
-                            "Appearance" -> CleanIcons.StarLine
-                            "Lists" -> CleanIcons.Notes
-                            "Data" -> CleanIcons.Folder
-                            "Tips" -> CleanIcons.Bolt
+                            PAGE_WORKOUT -> CleanIcons.DumbbellLine
+                            PAGE_APPEARANCE -> CleanIcons.StarLine
+                            PAGE_DATA -> CleanIcons.Folder
                             else -> CleanIcons.Info
                         }
-                        // Linen sets the icon in a small grey circle.
-                        val circles = clean.app.ui.theme.LocalLook.current.iconCircles
-                        Box(Modifier.size(if (circles) 36.dp else 40.dp).background(if (circles) clean.app.ui.theme.LocalLook.current.tile else MaterialTheme.colorScheme.surfaceContainer, if (circles) CircleShape else cardShape()), contentAlignment = Alignment.Center) {
-                            Icon(icon, null, Modifier.size(if (circles) 20.dp else 22.dp), tint = if (circles) clean.app.ui.theme.LocalLook.current.text else MaterialTheme.colorScheme.primary)
+                        Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceContainer, cardShape()), contentAlignment = Alignment.Center) {
+                            Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
                         }
                         Column(Modifier.weight(1f)) {
                             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -323,48 +291,19 @@ fun SettingsScreen(model: AppModel) {
                     }
                 }
             }
-            if (page == "Profile") profile?.let { p ->
-                item(key = "s-profile:${p.id}") {
-                    Section("This profile", Modifier.settleNext()) {
-                        var name by remember { mutableStateOf(p.name) }
-                        var height by remember { mutableStateOf(p.heightCm?.let(::shortNumber) ?: "") }
-                        OutlinedTextField(name, { name = it; if (it.isNotBlank()) model.update(p.copy(name = it.trim())) }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                            Text("Weights in")
-                            Choice(listOf("kg", "lb"), p.unit, { it }) { model.update(p.copy(unit = it)) }
-                        }
-                        OutlinedTextField(
-                            height, { height = it; model.update(p.copy(heightCm = parseNumber(it))) },
-                            label = { Text("Height (cm)") }, singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
-            }
-            if (page == "Profile") item(key = "s-profiles") {
-                Section("Profiles", Modifier.settleNext()) {
-                    for (p in profiles) {
-                        Row(Modifier.fillMaxWidth().clickable { model.switchTo(p.id) }, verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(selected = p.id == profile?.id, onClick = { model.switchTo(p.id) })
-                            Text(p.name, Modifier.weight(1f))
-                            if (profiles.size > 1) IconButton(onClick = { deleting = p }) { Icon(CleanIcons.Delete, "Delete profile") }
-                        }
-                    }
-                    QuietButton("New profile", { adding = true })
-                }
-            }
-            if (page == "Data") item(key = "s-backup") {
-                Section("Backup", Modifier.settleNext()) {
+            // Data and backup
+            if (page == PAGE_DATA) item(key = "s-backup") {
+                PageSection("Backup", Modifier.settleNext()) {
                     Text(
                         "One zip with everything in Clean. Restoring it replaces what is on the phone. Keep it somewhere off the phone.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    QuietButton(if (backingUp) "Backing up…" else "Back up everything", { startBackup() }, Modifier.fillMaxWidth(), enabled = !backingUp)
+                    QuietButton(if (backingUp) "Backing up ${plural(model.workouts.collectAsState().value.size, "workout")}…" else "Back up everything", { startBackup() }, Modifier.fillMaxWidth(), enabled = !backingUp)
                     QuietButton("Restore a backup", { history.pickRestore() }, Modifier.fillMaxWidth())
                 }
             }
-            if (page == "Data") item(key = "s-import") {
-                Section("Import into ${profile?.name ?: "profile"}") {
+            if (page == PAGE_DATA) item(key = "s-import") {
+                PageSection("Import into ${profile?.name ?: "profile"}") {
                     Text(
                         "From Strong, Hevy, Lyfta, Fitbod, FitNotes, GymMane or openGym, or any CSV with a date, an exercise and reps; a zip with one of them in it works too, and so does Strong's measurements zip. A Clean backup picked here is restored instead. Clean says what the file is and what it would add before anything is saved.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -372,16 +311,16 @@ fun SettingsScreen(model: AppModel) {
                     QuietButton("Import", { history.pickImport() }, Modifier.fillMaxWidth())
                 }
             }
-            if (page == "Data") item(key = "s-export") {
-                Section("Export from ${profile?.name ?: "profile"}") {
+            if (page == PAGE_DATA) item(key = "s-export") {
+                PageSection("Export from ${profile?.name ?: "profile"}") {
                     Text("Strong's format is the exact one, so the file opens anywhere a Strong export does. The other formats hold only what those apps have room for.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     QuietButton("Workouts", { exporting = true }, Modifier.fillMaxWidth())
                     QuietButton("Measurements", { saveMeasurements.launch("clean_measurements_${LocalDate.now()}.zip") }, Modifier.fillMaxWidth())
                     Toggle(model, "export.rest", "Write rest timers", "A row after each set with the rest that followed it, as older Strong exports have. Applies to workouts finished from now on.", default = false)
                 }
             }
-            if (page == "Data") item(key = "s-health") {
-                Section("Health Connect", Modifier.settleNext()) {
+            if (page == PAGE_DATA) item(key = "s-health") {
+                PageSection("Health Connect", Modifier.settleNext()) {
                     Text(
                         "Health Connect is the store on this phone that health apps share. With this on, Clean writes each finished workout to it (as strength training, with its name and times) and each weigh-in. Clean reads nothing from it, and none of it goes online.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -401,8 +340,8 @@ fun SettingsScreen(model: AppModel) {
                     }
                 }
             }
-            if (page == "Data") item(key = "s-animations") {
-                Section("Exercise animations", Modifier.settleNext()) {
+            if (page == PAGE_DATA) item(key = "s-animations") {
+                PageSection("Exercise animations", Modifier.settleNext()) {
                     Text(
                         "The steps on an exercise's Info tab can have a moving picture above them. The pictures are © Gym visual and are not part of Clean: for your own use, download the zip of github.com/hasaneyldrm/exercises-dataset (Code, Download ZIP, about 130 MB) in a browser and pick it here. Only the pictures are copied in; the app still never goes online.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -412,102 +351,141 @@ fun SettingsScreen(model: AppModel) {
                     if (animations > 0) DangerButton("Remove the animations", { Animations.clear(context); animations = 0 })
                 }
             }
-            if (page == "Data") item(key = "s-templates") {
-                Section("Templates", Modifier.settleNext()) {
-                    Text("Strong's export has no templates, so they travel in a file of Clean's own, folders included. The same two actions are in the Workout tab's ⋯ menu.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (page == PAGE_DATA) item(key = "s-templates") {
+                PageSection("Templates", Modifier.settleNext()) {
+                    Text("Strong's export has no templates, so they travel in a file of Clean's own, folders included. The same two actions are in the Workout sheet's ⋯ menu.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     QuietButton("Export templates", { saveTemplates.launch("clean_templates_${LocalDate.now()}.json") }, Modifier.fillMaxWidth())
-                    QuietButton("Import templates", { model.importTemplatesNow = true; model.stack.clear(); model.tab = Tab.Workout }, Modifier.fillMaxWidth())
+                    QuietButton("Import templates", { model.importTemplatesNow = true; model.stack.clear(); model.openWorkoutSheet() }, Modifier.fillMaxWidth())
                 }
             }
-            // Performance mode (2026-11-16, the user's words: "an option in settings called performance mode, to turn off all animations"):
-            // the old Animations switch turned over, kv `ui.motion` = `off` when on, so nothing moves anywhere (Motion, LocalMotion).
-            if (page == "Appearance") item(key = "ap-performance") {
-                Section("Performance", Modifier.settleNext()) {
-                    Toggle(model, "ui.motion", "Performance mode", "Turns off every animation: cards growing into pages, fades, glides and celebrations. Everything changes at once.",
-                        inverted = true)
+            if (page == PAGE_DATA) item(key = "s-renamed") { RenamedExercises(model) }
+            if (page == PAGE_DATA) item(key = "s-tidy") {
+                PageSection("Tidy up", Modifier.settleNext()) {
+                    Text("Notes such as “Wide grip” can be turned into variations, so those sets get their own history and PRs.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    QuietButton("Turn notes into variations", { model.open(Screen.NoteReview()) }, Modifier.fillMaxWidth())
                 }
             }
-            if (page == "Appearance") item(key = "ap-preset") { PresetSection(model) }
-            if (page == "Appearance") item(key = "ap-mono") { MonoSection(model) }
-            if (page == "Appearance") item(key = "ap-daynight") { DayNightSection(model) }
-            if (page == "Appearance") item(key = "ap-mix") { MixSection(model) { wheel = it } }
-            if (page == "Appearance") item(key = "ap-home") {
-                Section("Home", Modifier.settleNext()) {
-                    HomeOptions(model)
-                    LinkRow("Arrange home", "Move, resize, hide or add the cards on Home", "") { model.open(Screen.EditHome) }
-                    LinkRow("Arrange profile", "Move, resize, hide or add the cards on Profile", "") { model.open(Screen.EditProfile) }
-                }
-            }
-            if (page == "Appearance") item(key = "ap-tabs") {
-                Section("Tab bar", Modifier.settleNext()) { LinkRow("Tab order", "Where each tab sits; Workout stays in the middle", "") { model.open(Screen.Navigation) } }
-            }
-            if (page == "Appearance") item(key = "ap-charts") {
-                val stored by model.options.collectAsState()
-                Section("Charts", Modifier.settleNext()) {
-                    Text("How the charts on exercise, weight, trends and template pages draw their figures", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Choice(ChartStyle.entries.toList(), chartStyleOf(stored["chart.style"]), { it.label }) { model.setOption("chart.style", it.key) }
+            if (page == PAGE_DATA) item(key = "s-delete") {
+                PageSection("Delete everything", Modifier.settleNext()) {
                     Text(
-                        "Line is the default. Bars draw one bar per point, a left and right session as two bars. Smoothed draws a 5-point moving average with the points themselves faint. The small lines on Home's tiles stay lines.",
+                        "Takes every profile, workout, template, measurement, option and imported file off this phone, and Clean starts as when it was first installed.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    DangerButton("Delete everything…", { scope.launch { wipe = withContext(Dispatchers.IO) { Backup.current(context) } } })
+                }
+            }
+            // Appearance (D4, F5): theme, accent, then rows.
+            if (page == PAGE_APPEARANCE) item(key = "ap-theme") {
+                PageSection("Theme", Modifier.settleNext()) {
+                    Segmented(LOOK_THEMES, theme, { THEME_NAMES.getValue(it) }) { model.setOption(LOOK_THEME_KEY, it) }
+                    Text(
+                        if (theme == "phone") "Follows the phone: Dark or Light as it is." else "Dark is easy on the eyes at the gym; Light is for bright rooms.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            if (page == "Appearance") item(key = "ap-customize") {
-                Section("Customize", Modifier.settleNext()) {
-                    // "Preset's own" clears the override, so the part is the preset's value again (2026-10-16).
-                    val stored by model.options.collectAsState()
-                    Text("Theme", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Choice(listOf(PRESET_OWN, "Dark", "Light", "System"), stored["theme"] ?: PRESET_OWN, { it }) { model.setOption("theme", it.takeIf { v -> v != PRESET_OWN }) }
-                    Text("Sticky notes", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (page == PAGE_APPEARANCE) item(key = "ap-accent") {
+                PageSection("Accent", Modifier.settleNext()) {
+                    Text("Buttons, selection, links, the running workout, and the calendar, body figure and charts.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        for ((name, shades) in ACCENTS) {
+                            val on = name == look.accentName
+                            val colour = if (look.dark) shades.first else shades.second
+                            Box(
+                                Modifier.size(44.dp).background(colour, CircleShape)
+                                    .border(if (on) 3.dp else 0.dp, if (on) MaterialTheme.colorScheme.onSurface else Color.Transparent, CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (on) Icon(CleanIcons.Check, null, Modifier.size(22.dp), tint = colour.readableOn())
+                                Swatch(name, on) { model.setOption(LOOK_ACCENT_KEY, name) }
+                            }
+                        }
+                    }
+                }
+            }
+            if (page == PAGE_APPEARANCE) item(key = "ap-text") {
+                PageSection("Text size", Modifier.settleNext()) {
+                    Choice(listOf("Smallest", "Small", "Medium", "Large", "Largest"), textSize, { it }) { model.setOption("textSize", it) }
+                    Text("The spacing of cards and lists follows the text: smaller text packs more onto a screen, larger text gives it room.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (page == PAGE_APPEARANCE) item(key = "ap-black") {
+                PageSection("Background", Modifier.settleNext()) {
+                    // Only the Dark theme has a black page; Light has nothing to turn black.
+                    val meaningful = theme != "light"
+                    Toggle(
+                        model, LOOK_BLACK_KEY, "Pure black background",
+                        if (meaningful) "A black page under the cards, for OLED screens." else "Dark theme only: switch to Dark (or Phone) to use it.",
+                        default = false, enabled = meaningful,
+                    )
+                }
+            }
+            if (page == PAGE_APPEARANCE) item(key = "ap-glass") {
+                PageSection("Transparency", Modifier.settleNext()) {
+                    Toggle(model, "glass.reduce", "Reduce transparency", "Solid bars, sheets and menus. Also on when the phone's own reduce-transparency or high-contrast setting is on.", default = false)
+                }
+            }
+            if (page == PAGE_APPEARANCE) item(key = "ap-cbsafe") {
+                PageSection("Colours", Modifier.settleNext()) {
+                    Toggle(model, "theme.cbsafe", "Colour-blind safe colours", "Blue and orange in place of green and red for PRs, fatigue, strength and BMI.", default = false)
+                }
+            }
+            if (page == PAGE_APPEARANCE) item(key = "ap-motion") {
+                PageSection("Animations", Modifier.settleNext()) {
+                    Toggle(model, "ui.motion", "Animations", "Cards growing into pages, fades, glides and celebrations. Off, everything changes at once, and ticking a set makes no buzz.")
+                }
+            }
+            if (page == PAGE_APPEARANCE) item(key = "ap-sticky") {
+                PageSection("Sticky notes", Modifier.settleNext()) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalArrangement = Arrangement.spacedBy(Space.s)) {
                         for (name in STICKY_COLORS.keys) {
                             val on = name == stickyColor || (stickyColor.isEmpty() && name == STICKY_COLORS.keys.first())
                             Box(
-                                Modifier.size(34.dp).background(stickyBand(name, clean.app.ui.theme.LocalLook.current.dark).inLook(), CircleShape)
+                                Modifier.size(34.dp).background(stickyBand(name, look.dark), CircleShape)
                                     .border(if (on) 3.dp else 1.dp, if (on) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outlineVariant, CircleShape),
                                 contentAlignment = Alignment.Center,
                             ) { Swatch(name, on) { model.setOption("sticky.color", name) } }
                         }
                         WheelSwatch(34, stickyColor.startsWith("#")) { wheel = "sticky.color" }
                     }
-                    Text("Dark background", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Choice(listOf(PRESET_OWN, "Black", "Dark grey", "Custom"), if (stored["background"] == null) PRESET_OWN else if (background.startsWith("#")) "Custom" else background, { it }) {
-                        if (it == "Custom") wheel = "background" else model.setOption("background", it.takeIf { v -> v != PRESET_OWN })
-                    }
-                    Text("Text size", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Choice(listOf("Smallest", "Small", "Medium", "Large", "Largest"), textSize, { it }) { model.setOption("textSize", it) }
-                    Text("The spacing of cards and lists follows the text: smaller text packs more onto a screen, larger text gives it room.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Font", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(font?.substringAfter('|') ?: "The preset's own")
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                        QuietButton("Import a font file", { pickFont.launch(arrayOf("*/*")) })
-                        if (font != null) TextButton(onClick = {
-                            font?.substringBefore('|')?.let { File(it).delete() }
-                            model.setOption("font", null)
-                        }) { Text("Use the preset's") }
-                    }
-                    Text("A .ttf or .otf file from this phone. It is copied into the app, nothing is downloaded.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Toggle(model, PREVIEW_LIVE, "Live preview", "After you change how something looks, a small pop-up shows it before and after.")
+                    Text("The colour of a note's band in a workout.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (page == PAGE_APPEARANCE) item(key = "ap-blur") {
+                PageSection("Photos", Modifier.settleNext()) {
                     Toggle(model, "photos.blur", "Blur progress photos", "On Profile and in the photo list. A photo is sharp once you open it.", default = false)
                 }
             }
-            if (page == "Workout") item(key = "s-autofill") {
-                Section("Auto-fill sets", Modifier.settleNext()) {
+            // Workout: Rest, then Training, then the rest of what a workout does.
+            if (page == PAGE_WORKOUT) item(key = "s-rest") {
+                val stored by model.options.collectAsState()
+                PageSection("Rest", Modifier.settleNext()) {
+                    RestChoice("Default rest", restDefault, listOf(0, 60, 90, 120, 180, 300), { model.setOption("rest.seconds", it.toString()) })
+                    Text("An exercise can have its own length, from its options in a workout.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    RestChoice("Rest between sides", stored["rest.sides"]?.toIntOrNull() ?: 60, listOf(0, 30, 60, 90, 120), { model.setOption("rest.sides", it.toString()) })
+                    Text("After the first side of a left and right exercise, before the other", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    QuietButton("Rest by set type…", { restKinds = true }, Modifier.fillMaxWidth(), summary = "Warm-up, failure and drop sets, and after a hard set")
+                    Text("When the rest ends", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val ends = listOf(RestEndFeedback.SOUND, RestEndFeedback.VIBRATE, RestEndFeedback.BOTH)
+                    val end = restEndFeedback(stored["feedback.restEnd"], stored["rest.sound"], stored["rest.alert"])
+                    Choice(ends, end, { if (it == RestEndFeedback.VIBRATE) "Buzz" else it.key.replaceFirstChar(Char::uppercase) }) { model.setOption("feedback.restEnd", it.key); if (it.sound) Feedback.bell(RestTone.Deep) }
                     Text(
-                        "“Auto-fill sets” in an exercise's options during a workout lays out these sets and fills in a weight and reps that would beat your best estimated 1RM: more reps at the same weight first, then more weight.",
+                        "Sound is the bell at zero, at the phone's media volume, so it comes through headphones. Buzz is a pulse on each of the last five seconds, the last one longer.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text("Warm-up sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Choice((0..3).toList(), auto.third, { it.toString() }) { model.setOption("auto.warm", it.toString()) }
-                    Text("One warm-up is half the working weight; more of them step up evenly from there.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Working sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Choice((1..5).toList(), auto.first, { it.toString() }) { model.setOption("auto.sets", it.toString()) }
-                    Text("Drop sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Choice((0..3).toList(), auto.second, { it.toString() }) { model.setOption("auto.drops", it.toString()) }
+                    Toggle(
+                        model, "rest.background", "Alert outside the app",
+                        "An alarm on the phone buzzes through the last five seconds and rings the bell as the rest ends, with a notification counting down. Nothing goes online.", default = false,
+                    ) { on ->
+                        if (!on) model.setOption("rest.background", "off")
+                        else if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        else model.setOption("rest.background", "on")
+                    }
+                    Toggle(model, "rest.return", "Go back to the workout when the rest ends")
                 }
             }
-            if (page == "Workout") item(key = "s-consistency") {
-                Section("Consistency", Modifier.settleNext()) {
+            if (page == PAGE_WORKOUT) item(key = "s-consistency") {
+                PageSection("Training", Modifier.settleNext()) {
                     val goals = model.targets.collectAsState().value.orEmpty()
                     val monday = clean.core.weekStart(java.time.LocalDate.now())
                     Text("Weekly target", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -524,27 +502,13 @@ fun SettingsScreen(model: AppModel) {
                         "Follow a weekly plan of templates and rest days; a streak counts the weeks it was kept.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Toggle(model, "split.on", "Current split", "Rotate Up next through one folder", default = false)
+                    Toggle(model, "workout.hint", "Suggest what to try", "Under an exercise's name: last time's best set and the set that would beat your best. Not shown where a progression is set.")
                     Toggle(model, "reward.celebrate", "Celebrate on finishing", "A target reached, a new badge or a shield earned shows at the top of the summary, with a chime and two taps. Silent with animations off.")
                 }
             }
-            if (page == "Workout") item(key = "s-weeksets") {
-                Section("Weekly sets per muscle", Modifier.settleNext()) {
-                    val range by model.defaultSetRange.collectAsState()
-                    var low by remember { mutableStateOf(range.min.toString()) }
-                    var high by remember { mutableStateOf(range.max.toString()) }
-                    fun store() { SetRange.decode("${low.trim()}-${high.trim()}")?.let { model.setSetRange(null, it.encode()) } }
-                    Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                        OutlinedTextField(low, { low = it; store() }, label = { Text("From") }, singleLine = true, modifier = Modifier.weight(1f))
-                        OutlinedTextField(high, { high = it; store() }, label = { Text("To") }, singleLine = true, modifier = Modifier.weight(1f))
-                    }
-                    Text(
-                        "Sets a week to aim for in each muscle group, counted as on the Body page. Each muscle can have its own range, from its page.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            if (page == "Workout") item(key = "s-onerm") {
-                Section("Estimated 1RM", Modifier.settleNext()) {
+            if (page == PAGE_WORKOUT) item(key = "s-onerm") {
+                PageSection("Estimated 1RM", Modifier.settleNext()) {
                     Text(
                         "The heaviest single you could likely lift, worked out from a set's weight and reps. It is what 1RM PRs, the charts, the 1RM tiles and the L 1RM and R 1RM columns show.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -576,107 +540,44 @@ fun SettingsScreen(model: AppModel) {
                     )
                 }
             }
-            if (page == "Workout") item(key = "s-layout") {
-                val stored by model.options.collectAsState()
-                Section("Layout", Modifier.settleNext()) {
-                    Text("Set rows", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    val rows = listOf("comfortable" to "Comfortable", "compact" to "Compact")
-                    Choice(rows, rows.firstOrNull { it.first == stored["workout.rows"] } ?: rows[0], { it.second }) { model.setOption("workout.rows", it.first) }
-                    Text(
-                        "Comfortable shows last time's set beside each set. Compact leaves that column out and packs the rows closer; last time still shows in grey in the empty boxes.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    val swipes = listOf("finish" to "Finish", "delete" to "Delete", "off" to "Off")
-                    Text("Swipe a set right", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Choice(swipes, swipes.firstOrNull { it.first == stored["swipe.right"] } ?: swipes[0], { it.second }) { model.setOption("swipe.right", it.first) }
-                    Text("Swipe a set left", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Choice(swipes, swipes.firstOrNull { it.first == stored["swipe.left"] } ?: swipes[1], { it.second }) { model.setOption("swipe.left", it.first) }
-                    Text(
-                        "Finish ticks the set as its box does and buzzes at the threshold; swiping a done set un-ticks it. Delete can be undone from the bar at the bottom. In a left and right pair a swipe acts on one half at a time.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Toggle(model, "workout.focus", "Focus mode", "One exercise at a time, its next set large with a Done button. Swipe for the next exercise; All in the top bar returns to the list.", default = false)
-                    Toggle(model, "workout.oneHand", "One-handed mode", "The workout starts a third of the way down the screen, within thumb reach, and the Done button is taller.", default = false)
-                }
-            }
-            if (page == "Workout") item(key = "s-rest") {
-                val stored by model.options.collectAsState()
-                Section("Rest timer", Modifier.settleNext()) {
-                    Text("While resting, the countdown is shown as", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    val styles = listOf("full" to "Full screen", "ring" to "Ring", "bar" to "Slim bar", "hide" to "Full screen then hide")
-                    Choice(styles, styles.firstOrNull { it.first == stored["rest.style"] } ?: styles[0], { it.second }) { model.setOption("rest.style", it.first) }
-                    if ((stored["rest.style"] ?: "full") == "hide") {
-                        Text("Full screen for", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Choice(REST_HIDE_CHOICES, stored["rest.hideAfter"]?.toIntOrNull() ?: DEFAULT_REST_HIDE, { "$it s" }) { model.setOption("rest.hideAfter", it.toString()) }
-                        Text("Then it shrinks to a small pill at the top; a tap brings it back, and it returns by itself for the last 10 seconds.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (page == PAGE_WORKOUT) item(key = "s-weeksets") {
+                PageSection("Weekly sets per muscle", Modifier.settleNext()) {
+                    val range by model.defaultSetRange.collectAsState()
+                    var low by remember { mutableStateOf(range.min.toString()) }
+                    var high by remember { mutableStateOf(range.max.toString()) }
+                    fun store() { SetRange.decode("${low.trim()}-${high.trim()}")?.let { model.setSetRange(null, it.encode()) } }
+                    Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                        OutlinedTextField(low, { low = it; store() }, label = { Text("From") }, singleLine = true, modifier = Modifier.weight(1f))
+                        OutlinedTextField(high, { high = it; store() }, label = { Text("To") }, singleLine = true, modifier = Modifier.weight(1f))
                     }
-                    Text("Rest again for", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    PresetFields(parseRestPresets(stored["rest.presets"])) { model.setOption("rest.presets", it.joinToString(",")) }
                     Text(
-                        "Four lengths in seconds, shown as chips while resting: a tap starts the rest again at that length. An exercise can have its own rest length, from its options in a workout (Rest timer).",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text("Notification", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    val forms = listOf("expanded" to "Expanded", "compact" to "Compact")
-                    Choice(forms, forms.firstOrNull { it.first == stored["rest.notif"] } ?: forms[0], { it.second }) { model.setOption("rest.notif", it.first) }
-                    Text(
-                        "With the app behind (and the alert in the background switched on), the rest shows on the lock screen. Expanded adds a bar and the next set; the arrow on it switches form.",
+                        "Sets a week to aim for in each muscle group, counted as on the Body page. Each muscle can have its own range, from its page.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            if (page == "Workout") item(key = "s-feedback") {
-                val stored by model.options.collectAsState()
-                Section("Feedback", Modifier.settleNext()) {
-                    Text("When a set is ticked", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    val ticks = listOf("off" to "Off", "light" to "Light", "strong" to "Strong")
-                    Choice(ticks, ticks.firstOrNull { it.first == stored["feedback.tick"] } ?: ticks[1], { it.second }) { model.setOption("feedback.tick", it.first); if (it.first == "strong") Feedback.pulse(40) }
-                    Text("When the rest ends", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    val ends = listOf(RestEndFeedback.SOUND, RestEndFeedback.VIBRATE, RestEndFeedback.BOTH)
-                    val end = restEndFeedback(stored["feedback.restEnd"], stored["rest.sound"], stored["rest.alert"])
-                    Choice(ends, end, { it.key.replaceFirstChar(Char::uppercase) }) { model.setOption("feedback.restEnd", it.key) }
+            if (page == PAGE_WORKOUT) item(key = "s-autofill") {
+                PageSection("Auto-fill sets", Modifier.settleNext()) {
                     Text(
-                        "Sound is the bell at zero, at the phone's media volume, so it comes through headphones. Vibrate is a pulse on each of the last five seconds, the last one longer.",
+                        "“Auto-fill sets” in an exercise's options during a workout lays out these sets and fills in a weight and reps that would beat your best estimated 1RM: more reps at the same weight first, then more weight.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    // Picking a sound plays it.
-                    if (end.sound) Choice(RestTone.entries, RestTone.of(stored["rest.tone"]), { it.label }) { model.setOption("rest.tone", it.key); Feedback.bell(it) }
-                    Text("When a set earns a PR", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    val celebrations = listOf("none" to "None", "glow" to "Glow", "confetti" to "Confetti")
-                    Choice(celebrations, celebrations.firstOrNull { it.first == stored["pr.celebrate"] } ?: celebrations[0], { it.second }) { model.setOption("pr.celebrate", it.first) }
-                    Text("The set lights up in the accent, or a few pieces fly from it. Never with animations off.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Toggle(model, "pr.moment", "Sound and buzz on a new PR", "A soft chime and two taps when a set earns a new estimated 1RM. Silent with animations off.")
+                    Text("Warm-up sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Choice((0..3).toList(), auto.third, { it.toString() }) { model.setOption("auto.warm", it.toString()) }
+                    Text("One warm-up is half the working weight; more of them step up evenly from there.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Working sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Choice((1..5).toList(), auto.first, { it.toString() }) { model.setOption("auto.sets", it.toString()) }
+                    Text("Drop sets", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Choice((0..3).toList(), auto.second, { it.toString() }) { model.setOption("auto.drops", it.toString()) }
                 }
             }
-            if (page == "Workout") item(key = "s-outside") {
-                Section("Outside the app", Modifier.settleNext()) { LinkRow("Launcher shortcuts", shortcutsName(model.options.collectAsState().value["shortcuts"]), "") { model.open(Screen.Shortcuts) } }
-            }
-            if (page == "Workout") item(key = "s-tplcolors") { TemplateColorSettings(model) }
-            if (page == "Workout") item(key = "s-during") {
-                Section("During a workout", Modifier.settleNext()) {
-                    RestChoice("Rest after a set", restDefault, listOf(0, 60, 90, 120, 180, 300), { model.setOption("rest.seconds", it.toString()) })
-                    Text("An exercise can have its own length, from its options in a workout.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    // A kind of set can have a rest of its own; "Same" follows the length above, and a warm-up left alone rests half of it.
-                    val stored by model.options.collectAsState()
-                    for ((key, label) in listOf("rest.warmup" to "After a warm-up set", "rest.failure" to "After a set to failure", "rest.drop" to "After a drop set")) {
-                        val own = stored[key]?.toIntOrNull() ?: -1
-                        RestChoice(
-                            label, own, if (key == "rest.warmup") listOf(-1, 0, 15, 30, 60, 90, 120, 180, 300) else listOf(-1, 0, 30, 60, 90, 120, 180, 300),
-                            { model.setOption(key, if (it < 0) null else it.toString()) },
-                            value = if (own >= 0) restLabel(own) else if (key == "rest.warmup") "Half · ${restLabel(restDefault / 2)}" else "Same · ${restLabel(restDefault)}",
-                            unset = if (key == "rest.warmup") "Half" else "Same",
-                        )
-                    }
-                    RestChoice("Between sides", stored["rest.sides"]?.toIntOrNull() ?: 60, listOf(0, 30, 60, 90, 120), { model.setOption("rest.sides", it.toString()) })
-                    Text("After the first side of a left and right exercise, before the other", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Toggle(
-                        model, "rest.background", "Alert when the app is in the background",
-                        "An alarm on the phone buzzes through the last five seconds and rings the bell as the rest ends, with a notification counting down. Nothing goes online.", default = false,
-                    ) { on ->
-                        if (!on) model.setOption("rest.background", "off")
-                        else if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        else model.setOption("rest.background", "on")
-                    }
+            if (page == PAGE_WORKOUT) item(key = "s-during") {
+                val stored by model.options.collectAsState()
+                PageSection("In a workout", Modifier.settleNext()) {
+                    Toggle(model, "workout.summary", "Summary when a workout is finished", "Duration, volume, PRs and muscles, next to the last time you did the same routine.")
+                    Toggle(model, "workout.rpe", "RPE on the number pad", "A key for how hard a set felt, 6 to 10. It is saved in the export's RPE column.")
+                    Toggle(model, "workout.highlight", "Show the next set", "The set to do next is marked and scrolled to. In a superset the turn alternates.")
+                    Toggle(model, "workout.compact", "Shrink finished exercises", "An exercise with every set ticked takes a line or two until touched.")
                     Toggle(
                         model, "workout.notif", "Workout on the lock screen",
                         "While the app is behind, a quiet notification shows the workout's time, the rest and the next set; a tap goes back to it.",
@@ -703,82 +604,38 @@ fun SettingsScreen(model: AppModel) {
                     val unit = profile?.unit ?: "kg"
                     QuietButton("Bar and plates…", { plateUnit = unit }, summary = "Your own bar and plates, for the plate calculator in a barbell set's menu")
                     plateUnit?.let { PlateKitDialog(model, it) { plateUnit = null } }
-                    val hard = stored["rest.hard"]?.toIntOrNull() ?: 0
-                    RestChoice("Extra rest after a hard set", hard, listOf(0, 15, 30, 60), { model.setOption("rest.hard", it.toString()) })
-                    Text("RPE 9 or more, or a set to failure", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Toggle(model, "rest.return", "Go back to the workout when the rest ends")
-                    Text("Tapping an exercise's name in a workout opens its", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Choice(EXERCISE_TABS.indices.toList(), exerciseTab, { EXERCISE_TABS[it] }) { model.setOption("workout.exerciseTab", it.toString()) }
-                    Toggle(model, "workout.summary", "Summary when a workout is finished", "Duration, volume, PRs and muscles, next to the last time you did the same routine.")
-                    Toggle(model, "workout.rpe", "RPE on the number pad", "A key for how hard a set felt, 6 to 10. It is saved in the export's RPE column.")
-                    Toggle(model, "workout.highlight", "Show the next set", "The set to do next is marked and scrolled to. In a superset the turn alternates.")
-                    Toggle(model, "workout.hint", "Suggest what to try", "Under an exercise's name: last time's best set and the set that would beat your best. Not shown where a progression is set.")
-                    Toggle(model, "workout.compact", "Shrink finished exercises", "An exercise with every set ticked takes a line or two until touched.")
-                    Text("“Workout in progress” bar", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Choice(listOf("Everywhere", "Main tabs", "Off"), bannerScope, { it }) { model.setOption("banner", it) }
                 }
             }
-            if (page == "Data") item(key = "s-renamed") { RenamedExercises(model) }
-            if (page == "Tips") item(key = "s-tips") {
-                Section("Gestures worth knowing", Modifier.settleNext()) {
-                    for (tip in TIPS) Text(tip)
+            // About and help
+            if (page == PAGE_ABOUT) item(key = "s-source") {
+                PageSection("Source code", Modifier.settleNext()) {
+                    Text("Clean is open source under the MIT License. The code is at:", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    // Just the address, to read or copy; the app has no internet access and opens nothing.
+                    SelectionContainer { Text(SOURCE_URL, color = MaterialTheme.colorScheme.primary) }
                 }
             }
-            if (page == "Data") item(key = "s-tidy") {
-                Section("Tidy up", Modifier.settleNext()) {
-                    Text("Notes such as “Wide grip” can be turned into variations, so those sets get their own history and PRs.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    QuietButton("Turn notes into variations", { model.open(Screen.NoteReview()) }, Modifier.fillMaxWidth())
-                }
-            }
-            if (page == "Data") item(key = "s-delete") {
-                Section("Delete everything", Modifier.settleNext()) {
-                    Text(
-                        "Takes every profile, workout, template, measurement, option and imported file off this phone, and Clean starts as when it was first installed.",
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    DangerButton("Delete everything…", { scope.launch { wipe = withContext(Dispatchers.IO) { Backup.current(context) } } })
-                }
-            }
-            if (page == "Lists") item(key = "s-lists") {
-                Section("Lists", Modifier.settleNext()) {
-                    Toggle(model, "library.hide", "Hide built-in exercises I haven't used", "They still turn up when you search or filter.")
-                    Toggle(model, "exercise.plateau", "Point out stalled exercises", "A line on an exercise's page when its last five sessions set no new best estimated 1RM.")
-                    Toggle(model, "calendar.weeks", "Week totals in the calendar")
-                }
-            }
-            if (page == "Credits") item(key = "s-source") {
-                Section("Source code", Modifier.settleNext()) {
-                    Text("Clean is open source under the MIT License. The code is at $SOURCE_URL.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    // Handed to the phone's browser; Clean itself still has no internet access. Without a browser the address is copied instead.
-                    TextButton(onClick = {
-                        try {
-                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(SOURCE_URL)))
-                        } catch (e: android.content.ActivityNotFoundException) {
-                            (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                                .setPrimaryClip(android.content.ClipData.newPlainText("Source code", SOURCE_URL))
-                            model.message = "No browser found. The address is copied."
-                        }
-                    }) { Text("Open in the browser") }
-                }
-            }
-            if (page == "Credits") item(key = "s-changes") {
+            if (page == PAGE_ABOUT) item(key = "s-changes") {
                 // Every version; the pop-up after an update shows only the newest.
                 val releases = remember { readChanges(context) }
-                if (releases.isNotEmpty()) Section("What's new") { ChangeList(releases) }
+                if (releases.isNotEmpty()) PageSection("What's new") { ChangeList(releases) }
             }
-            if (page == "Credits") item(key = "s-credits") {
-                Section("Credits", Modifier.settleNext()) {
+            if (page == PAGE_ABOUT) item(key = "s-credits") {
+                PageSection("Licences and credits", Modifier.settleNext()) {
                     Text("The body figure is drawn from MuscleMap by Melih Colpan, used under the MIT License.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     TextButton(onClick = { credits = true }) { Text("Show the licence") }
                     Text("The steps on an exercise's Info tab are from exercises-dataset by Hasan Emir Yıldırım (github.com/hasaneyldrm/exercises-dataset), used under the MIT License. None of that dataset's pictures or animations are in the app.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     TextButton(onClick = { datasetCredits = true }) { Text("Show the licence") }
-                    Text("The numbers of the Mono look are set in IBM Plex Mono, Copyright 2017 IBM Corp. with Reserved Font Name \"Plex\", used under the SIL Open Font License, Version 1.1 (openfontlicense.org). The font files are unchanged.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("The text and numbers of the Linen look are set in Inter, Copyright 2020 The Inter Project Authors (github.com/rsms/inter), used under the SIL Open Font License, Version 1.1 (openfontlicense.org). The font file is unchanged.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("The text and numbers are set in Inter, Copyright 2020 The Inter Project Authors (github.com/rsms/inter), used under the SIL Open Font License, Version 1.1 (openfontlicense.org). The font file is unchanged.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("Some icons are Google's Material icons, used under the Apache License 2.0 (apache.org/licenses/LICENSE-2.0).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("The blur behind bars and sheets is done by Haze by Chris Banes (github.com/chrisbanes/haze), used under the Apache License 2.0 (apache.org/licenses/LICENSE-2.0).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (page == PAGE_ABOUT) item(key = "s-tips") {
+                PageSection("Tips", Modifier.settleNext()) {
+                    for (tip in TIPS) Text(tip)
                 }
             }
             item { Spacer(Modifier.height(Space.xxl)) }
-        }
         }
         }
         }
@@ -794,13 +651,33 @@ fun SettingsScreen(model: AppModel) {
         )
     }
     wheel?.let { target ->
-        val initial = when (target) {
-            "accent" -> ACCENTS[accent]?.first ?: parseColor(accent)
-            "background" -> if (background == "Dark grey") Color(0xFF121316) else parseColor(background)
-            "sticky.color" -> STICKY_COLORS[stickyColor] ?: parseColor(stickyColor) ?: STICKY_COLORS.values.first()
-            else -> parseColor(palette) ?: paletteOf(palette).last()
-        } ?: MaterialTheme.colorScheme.primary
+        val initial = STICKY_COLORS[stickyColor] ?: parseColor(stickyColor) ?: STICKY_COLORS.values.first()
         ColorPickerDialog(initial, onPick = { model.setOption(target, it.hex()) }) { wheel = null }
+    }
+    if (restKinds) {
+        val stored by model.options.collectAsState()
+        CleanDialog(
+            onDismissRequest = { restKinds = false },
+            title = { Text("Rest by set type") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(Space.m)) {
+                    // A kind of set can have a rest of its own; "Same" follows the default, and a warm-up left alone rests half of it.
+                    for ((key, label) in listOf("rest.warmup" to "After a warm-up set", "rest.failure" to "After a set to failure", "rest.drop" to "After a drop set")) {
+                        val own = stored[key]?.toIntOrNull() ?: -1
+                        RestChoice(
+                            label, own, if (key == "rest.warmup") listOf(-1, 0, 15, 30, 60, 90, 120, 180, 300) else listOf(-1, 0, 30, 60, 90, 120, 180, 300),
+                            { model.setOption(key, if (it < 0) null else it.toString()) },
+                            value = if (own >= 0) restLabel(own) else if (key == "rest.warmup") "Half · ${restLabel(restDefault / 2)}" else "Same · ${restLabel(restDefault)}",
+                            unset = if (key == "rest.warmup") "Half" else "Same",
+                        )
+                    }
+                    val hard = stored["rest.hard"]?.toIntOrNull() ?: 0
+                    RestChoice("Extra rest after a hard set", hard, listOf(0, 15, 30, 60), { model.setOption("rest.hard", it.toString()) })
+                    Text("RPE 9 or more, or a set to failure", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = { TextButton(onClick = { restKinds = false }) { Text("Done") } },
+        )
     }
     if (exporting) Sheet({ exporting = false }, "Export workouts") {
         for (kind in ExportKind.entries) SheetRow(kind.label) {
@@ -831,9 +708,9 @@ fun SettingsScreen(model: AppModel) {
             title = { Text("Delete everything?") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                    Text("This removes profiles: ${now.profiles.size}, workouts: ${now.workouts}, templates: ${now.templates}, weigh-ins: ${now.weighIns}, every option, and the imported font and animations. It cannot be undone.")
+                    Text("This removes profiles: ${now.profiles.size}, workouts: ${now.workouts}, templates: ${now.templates}, weigh-ins: ${now.weighIns}, every option, and the imported animations. It cannot be undone.")
                     QuietButton("Back up first", { wipe = null; startBackup() }, Modifier.fillMaxWidth())
-                    DangerButton("Delete everything", {
+                    SlideToConfirm("Slide to delete everything", "Delete everything", {
                         wipe = null
                         scope.launch {
                             try {
@@ -850,19 +727,6 @@ fun SettingsScreen(model: AppModel) {
             },
             confirmButton = {},
         )
-    }
-    if (adding) {
-        var name by remember { mutableStateOf("") }
-        CleanDialog(
-            onDismissRequest = { adding = false },
-            title = { Text("New profile") },
-            text = { OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true) },
-            confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { model.createProfile(name.trim()); adding = false }) { Text("Create") } },
-            dismissButton = { TextButton(onClick = { adding = false }) { Text("Cancel") } },
-        )
-    }
-    deleting?.let { p ->
-        Confirm("Delete ${p.name}?", "All of this profile's workouts and measurements are removed from this phone. Export first if you want to keep them.", "Delete", { model.deleteProfile(p.id) }) { deleting = null }
     }
 }
 
@@ -917,10 +781,12 @@ fun rememberHistoryIn(model: AppModel, onImported: () -> Unit = {}): HistoryIn {
     val pickImport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) task { id ->
             // A Clean backup is a zip too, and goes to the restore instead.
+            model.message = "Reading the file…"
             val picked = withContext(Dispatchers.IO) { Backup.copyToCache(context, context.contentResolver.openInputStream(uri)!!) }
             if (withContext(Dispatchers.IO) { Backup.isBackup(picked) }) offerRestore(picked)
             else {
                 val bytes = withContext(Dispatchers.IO) { picked.readBytes().also { picked.delete() } }
+                model.message = "Reading ${"%,d".format(maxOf(1, bytes.size / 1024))} KB…"
                 // Strong's measurements zip is the one thing here that is not a workout file.
                 val measurements = withContext(Dispatchers.Default) { runCatching { model.repo.previewMeasurements(id, bytes) }.getOrNull() }?.takeIf { it.files.isNotEmpty() }
                 if (measurements != null) measurementImport = measurements
@@ -955,6 +821,7 @@ fun rememberHistoryIn(model: AppModel, onImported: () -> Unit = {}): HistoryIn {
             canImport = import.rows.isNotEmpty() || import.weights.isNotEmpty(),
             onConfirm = {
                 task {
+                    model.message = "Adding ${plural(import.workouts, "workout")}…"
                     model.repo.commit(it, import)
                     model.message = "${import.workouts} workouts imported" + if (import.weights.isEmpty()) "" else " and ${import.weights.size} weigh-ins"
                     onImported()
@@ -987,9 +854,9 @@ fun rememberHistoryIn(model: AppModel, onImported: () -> Unit = {}): HistoryIn {
                     Text("Profiles: ${found.profiles.joinToString(", ").ifEmpty { "none" }}")
                     Text("Workouts: ${found.workouts}" + if (found.first != null) ", ${prettyDay(found.first)} to ${prettyDay(found.last!!)}" else "")
                     Text("Weigh-ins: ${found.weighIns}, templates: ${found.templates}")
-                    if (r.found.animations || r.found.font) Text("With " + listOfNotNull("exercise animations".takeIf { r.found.animations }, "an imported font".takeIf { r.found.font }).joinToString(" and "))
+                    if (r.found.animations) Text("With exercise animations")
                     Text("This replaces everything on this phone now (profiles: ${r.now.profiles.size}, workouts: ${r.now.workouts}, with their templates, options and imported files). It cannot be undone.")
-                    DangerButton("Replace everything", {
+                    SlideToConfirm("Slide to replace everything", "Restore this backup and replace everything", {
                         restore = null
                         scope.launch {
                             try {
@@ -1035,35 +902,19 @@ private suspend fun exportBytes(model: AppModel, profileId: Long, kind: ExportKi
     }
 }
 
-/** The four rest lengths as number fields (seconds); a valid set is saved as it is typed. */
+/** A switch for an on/off option stored under [key]; [enabled] false greys it and takes no tap. */
 @Composable
-private fun PresetFields(current: List<Int>, onSave: (List<Int>) -> Unit) {
-    val texts = remember(current) { mutableStateListOf(*Array(REST_PRESET_COUNT) { current.getOrNull(it)?.toString().orEmpty() }) }
-    Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-        for (i in texts.indices) androidx.compose.material3.OutlinedTextField(
-            texts[i], { value ->
-                texts[i] = value.filter { it.isDigit() }.take(4)
-                val parsed = texts.map { it.toIntOrNull() }
-                if (parsed.all { it != null && it in 1..1800 }) onSave(parsed.filterNotNull())
-            },
-            Modifier.weight(1f), singleLine = true, label = { Text("s") }, isError = texts[i].toIntOrNull()?.let { it !in 1..1800 } ?: true,
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
-        )
-    }
-}
-
-/** A switch for an on/off option stored under [key]. */
-@Composable
-private fun Toggle(model: AppModel, key: String, title: String, about: String = "", default: Boolean = true, inverted: Boolean = false, onSwitch: (Boolean) -> Unit = { model.setOption(key, if (it != inverted) "on" else "off") }) {
-    // [inverted]: the switch shows on while the stored flag is off (Performance mode is animations off).
+private fun Toggle(model: AppModel, key: String, title: String, about: String = "", default: Boolean = true, inverted: Boolean = false, enabled: Boolean = true, onSwitch: (Boolean) -> Unit = { model.setOption(key, if (it != inverted) "on" else "off") }) {
+    // [inverted]: the switch shows on while the stored flag is off.
     val on = model.flag(key, default) != inverted
+    val quiet = MaterialTheme.colorScheme.onSurfaceVariant
     // The whole row is the switch, read out as one; the drawn switch only shows the state.
-    Row(Modifier.toggleable(on, role = Role.Switch, onValueChange = onSwitch).minTouch(), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.toggleable(on, enabled = enabled, role = Role.Switch, onValueChange = onSwitch).minTouch(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(title)
-            if (about.isNotEmpty()) Text(about, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, color = if (enabled) MaterialTheme.colorScheme.onSurface else quiet.copy(alpha = 0.6f))
+            if (about.isNotEmpty()) Text(about, style = MaterialTheme.typography.bodySmall, color = quiet)
         }
-        Switch(on, null)
+        Switch(on, null, enabled = enabled)
     }
 }
 
@@ -1083,9 +934,6 @@ private fun ImportDialog(title: String, lines: List<String>, canImport: Boolean,
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
-
-/** The choice that clears an appearance override, so the part is the chosen preset's own value again. */
-private const val PRESET_OWN = "Preset's own"
 
 /** The notice the MIT License asks to be kept with MuscleMap's outlines (the body figure). */
 private const val MUSCLEMAP_LICENCE = """MIT License
@@ -1110,19 +958,24 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE."""
 
-/** The headings of Settings and what is behind each. */
+/** The four pages of Settings (D4, F5): their names are also the page ids the search and the Profile and Home buttons use. */
+const val PAGE_WORKOUT = "Workout"
+const val PAGE_APPEARANCE = "Appearance"
+const val PAGE_DATA = "Data and backup"
+const val PAGE_ABOUT = "About and help"
+
+/** The main page's four rows with their one-line hints. */
 private val SETTINGS_PAGES = listOf(
-    "Profile" to "Name, units, height, and switching between profiles",
-    "Workout" to "Rest timer and its style, feedback, set rows, swipes and focus mode, weekly target, auto-fill, estimated 1RM, template colours, outside the app",
-    "Appearance" to "Performance mode, presets, Mix and match, Day & night, Mono, Home, tab bar, charts, text size and font",
-    "Lists" to "What the exercise list and the calendar show",
-    "Data" to "Backup and restore, import and export, Health Connect, animations, renames, delete everything",
-    "Credits" to "Source code, what's new and licences",
-    "Tips" to "Gestures that are not labelled",
+    PAGE_WORKOUT to "Rest, weekly target, Up next, estimated 1RM, auto-fill",
+    PAGE_APPEARANCE to "Theme, accent, text size, transparency, animations",
+    PAGE_DATA to "Backup, restore, import, export, Health Connect, delete everything",
+    PAGE_ABOUT to "What's new, source code, licences and credits, tips",
 )
 
-/** The gestures nothing on screen points to, each checked against the code. */
-/** The public repository; opened in the browser from Settings, Credits. */
+/** The theme choices by their stored word. */
+private val THEME_NAMES = mapOf("dark" to "Dark", "light" to "Light", "phone" to "Phone")
+
+/** The public repository; shown as text (to read or copy) under Settings, About and help. */
 const val SOURCE_URL = "https://github.com/rohan3412/clean-workout-tracker"
 
 private val TIPS = listOf(
@@ -1136,6 +989,5 @@ private val TIPS = listOf(
     "Swipe the figure sideways to go between Balance, Fatigue and Strength.",
     "Open the arrow on a muscle's row for its heads.",
     "Tap the ring on the Home tab for Trophies.",
-    "Tap the title of the Activity chart to bring it back to today.",
     "clean://start, clean://start?template=Name and clean://open?tab=history open the app from a link, and the launcher icon's shortcuts start a workout.",
 )

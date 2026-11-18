@@ -18,10 +18,9 @@ class OneLookTest {
         // A title-medium bold line is a section title unless it is one of these names or numbers, which have their own place.
         val allowed = mapOf(
             "Common.kt" to 1,     // SectionTitle itself
-            "Active.kt" to 1,     // an exercise's name in a workout, in the accent and draggable
-            "Stats.kt" to 1,      // the Today card's day, a tappable line
-            "Templates.kt" to 1,  // a template card's name
-            "Workouts.kt" to 1,   // a workout card's name
+            "Active.kt" to 2,     // an exercise's name in a workout, in the accent and draggable; the value in a number box
+            "Workouts.kt" to 2,   // a workout card's name, as the card's title and as the row the History card's row travels from
+            "Share.kt" to 1,      // a figure on the share picture
             "Photos.kt" to 2,     // captions over a full-screen photo and a comparison
         )
         val found = sources.mapValues { count(it.value, "typography.titleMedium, fontWeight = FontWeight.Bold") }.filterValues { it > 0 }

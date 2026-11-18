@@ -17,13 +17,12 @@ import clean.core.DayMark
 import clean.core.PickKind
 import clean.core.ShortcutKind
 import clean.core.decodeArgb
-import clean.core.parseShortcuts
 import clean.core.shortcutsShown
 import clean.core.weekMarks
 import clean.core.TemplateRef
 import clean.core.Workout
 import clean.core.decodeProgram
-import clean.core.nextTemplate
+import clean.core.upNextTemplate
 import clean.core.overallName
 import clean.core.todayPlan
 import clean.core.buildWorkouts
@@ -48,8 +47,8 @@ class WidgetData(
     val overalls: Map<String, String> = emptyMap(),
     /** The look's colours as stored (kv `widget.colors`, see [TodayColours]). */
     val colours: String? = null,
-    /** The launcher shortcuts as stored (kv `shortcuts`). */
-    val shortcuts: String? = null,
+    /** Whether the Current split switch is on (kv `split.on`). */
+    val splitOn: Boolean = false,
 ) {
     companion object {
         fun load(context: Context): WidgetData = runBlocking {
@@ -58,7 +57,7 @@ class WidgetData(
             WidgetData(
                 buildWorkouts(dao.rowsNow(id).map { it.toRow() }), dao.templatesNow(id).map { Triple(it.id, it.name, it.folder) }, dao.get("draft:$id") != null, dao.get("goal.week:$id"),
                 dao.get("program:$id"), dao.settingsNow(id).filter { it.overall.isNotEmpty() }.associate { it.name to it.overall },
-                dao.get("widget.colors"), dao.get("shortcuts"),
+                dao.get("widget.colors"), dao.get("split.on") == "on",
             )
         }
     }
@@ -149,9 +148,8 @@ private fun upNext(data: WidgetData): List<String> {
         val exists = data.templates.any { it.first == pick.day.templateId }
         return listOf("Up next · program", pick.day.label, note, if (exists) "template:${pick.day.templateId}" else "")
     }
-    // The templates in the "Current split" folder are the rotation: the one never done, else the one done longest ago.
-    // With that folder empty it is every template that has been used.
-    val next = nextTemplate(data.templates.map { TemplateRef(it.first, it.second, it.third) }, data.workouts, CURRENT_SPLIT, today)
+    // See [upNextTemplate]: with the Current split switch on, the rotation through that folder; off, the template done longest ago among those used lately.
+    val next = upNextTemplate(data.templates.map { TemplateRef(it.first, it.second, it.third) }, data.workouts, data.splitOn, CURRENT_SPLIT, today)
         ?: return listOf("Up next", "No template yet", "", "")
     return listOf(if (next.fromSplit) "Up next · current split" else "Up next", next.template.name, next.reason, "template:${next.template.id}")
 }
@@ -251,14 +249,14 @@ class RestDaysWidget : CleanWidget() {
 private val WIDGETS: List<CleanWidget> = listOf(WeekWidget(), StartWidget(), LastWidget(), NextWidget(), DaysWidget(), RestDaysWidget(), TodayWidget())
 
 /**
- * The launcher icon's shortcuts: the ones chosen in Settings (kv `shortcuts`), in that order. Start names the template the Today card
+ * The launcher icon's shortcuts: Start, Resume (while a workout runs) and Log weight. Start names the template the Today card
  * would start, Resume shows only while a workout runs, Log bodyweight opens the weight ruler. The links are the app's own, `clean://`.
  */
 private fun applyShortcuts(context: Context, data: WidgetData) {
     val next = upNext(data)
     val named = next[3].isNotEmpty()
     fun open(link: Uri?, action: String?): Intent = Intent(Intent.ACTION_VIEW, link, context, MainActivity::class.java).also { if (action != null) it.putExtra("widget", action) }
-    val shortcuts = shortcutsShown(parseShortcuts(data.shortcuts), data.inProgress).mapIndexed { rank, kind ->
+    val shortcuts = shortcutsShown(data.inProgress).mapIndexed { rank, kind ->
         val (short, long, intent) = when (kind) {
             ShortcutKind.START -> Triple(if (named) next[1].take(24) else "Start workout", if (named) "Start ${next[1]}".take(40) else "Start workout", open(null, if (named) next[3] else "start"))
             ShortcutKind.RESUME -> Triple("Resume workout", "Resume workout", open(Uri.parse("clean://resume"), null))

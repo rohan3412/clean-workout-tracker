@@ -5,6 +5,7 @@ import clean.core.bestRound
 import clean.core.bestSetOf
 import clean.core.recordCount
 import clean.core.roundLine
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -51,6 +52,12 @@ fun TemplateScreen(model: AppModel, id: Long) {
     val template = templates.firstOrNull { it.id == id }
     Scaffold(containerColor = pageContainer(), topBar = {
         BackBar(template?.name ?: "Template", model::back) { if (template != null) TextButton(onClick = { model.open(Screen.TemplateEdit(id)) }) { Text("Edit") } }
+    }, bottomBar = {
+        // Start is the page's one main button, at the bottom.
+        if (template != null) MainButton(
+            if (model.draft == null) "Start this workout" else "Resume the workout in progress", { if (model.draft == null) model.start(template) else model.resumeWorkout() },
+            Modifier.fillMaxWidth().navigationBarsPadding().padding(Space.l).heightIn(min = 52.dp),
+        )
     }) { padding ->
         if (template == null) return@Scaffold
         val list = remember(workouts, template.name) { workouts.filter { it.name == template.name } }
@@ -84,9 +91,6 @@ fun TemplateScreen(model: AppModel, id: Long) {
         fun kg(value: Double) = model.volume(value)
 
         LazyColumn(Modifier.padding(padding).fillMaxSize()) {
-            item {
-                MainButton(if (model.draft == null) "Start this workout" else "Resume the workout in progress", { if (model.draft == null) model.start(template) else model.resumeWorkout() }, Modifier.fillMaxWidth().padding(Space.l).heightIn(min = 52.dp))
-            }
             item {
                 Section("Plan", Modifier.settleIn(0)) {
                     LabelValue("Exercises", template.blocks.size.toString())

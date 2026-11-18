@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The rest notification, smaller form: the countdown on one line and a chevron at the top right. -->
+<!-- The rest notification, smaller form: the countdown on one line. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -20,12 +20,4 @@
         android:layout_height="wrap_content"
         android:layout_gravity="center_vertical"
         android:textAppearance="@android:style/TextAppearance.Material.Notification.Title" />
-
-    <ImageButton
-        android:id="@+id/notif_toggle"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:background="@null"
-        android:scaleType="center"
-        android:src="@drawable/ic_notif_more" />
 </LinearLayout>

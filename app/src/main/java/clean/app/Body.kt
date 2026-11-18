@@ -144,16 +144,42 @@ fun BodyScreen(model: AppModel) {
         LazyColumn(Modifier.padding(padding).fillMaxSize()) {
             if (unset > 0) {
                 item {
-                    Section("Muscles to set") {
+                    PageSection("Muscles to set") {
                         Text("$unset of your exercises are not in the library and their names gave no clue, so they are missing from the figure.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         MainButton("Set them", { model.open(Screen.ExerciseSetup) })
                     }
+                }
+            }
+            // The muscle with most sets in the time frame (it moved here from Progress, 1.1.0).
+            item {
+                val sets by model.muscleSetCounts.collectAsState()
+                sets.entries.maxByOrNull { it.value }?.takeIf { it.value > 0 }?.let { (m, n) ->
+                    Box(Modifier.padding(horizontal = Space.l)) { NavRow("Most trained muscle", "${m.label}, ${setsText(shortNumber(Math.round(n * 10) / 10.0))}", { model.open(Screen.MuscleDetail(m)) }, "progress:stat:muscle") }
                 }
             }
             item { MuscleCard(model) }
             item { Spacer(Modifier.height(Space.xxl)) }
         }
     }
+}
+
+/** Names a new kind of measurement and its unit; it gets a file of its own and goes into the export's zip with the rest. */
+@Composable
+internal fun NewMeasurementDialog(model: AppModel, onDismiss: () -> Unit) {
+    var name by rememberSaveable { mutableStateOf("") }
+    var unit by rememberSaveable { mutableStateOf("cm") }
+    CleanDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New measurement") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
+                OutlinedTextField(name, { name = it }, label = { Text("Name") }, placeholder = { Text("Forearm") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(unit, { unit = it }, label = { Text("Unit") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { model.addMeasurementKind(name.trim(), unit.trim()); onDismiss() }) { Text("Add") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 /** The measurements page: BMI, the weigh-ins and other files, and a way to start a new one. */
@@ -201,22 +227,7 @@ fun MeasurementsScreen(model: AppModel) {
             // Anything else worth tracking: it gets a file of its own and goes into the export's zip with the rest.
             var adding by rememberSaveable { mutableStateOf(false) }
             TextButton(onClick = { adding = true }, modifier = Modifier.padding(horizontal = Space.xs)) { Text("New measurement") }
-            if (adding) {
-                var name by rememberSaveable { mutableStateOf("") }
-                var unit by rememberSaveable { mutableStateOf("cm") }
-                CleanDialog(
-                    onDismissRequest = { adding = false },
-                    title = { Text("New measurement") },
-                    text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(Space.s)) {
-                            OutlinedTextField(name, { name = it }, label = { Text("Name") }, placeholder = { Text("Forearm") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                            OutlinedTextField(unit, { unit = it }, label = { Text("Unit") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                        }
-                    },
-                    confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { model.addMeasurementKind(name.trim(), unit.trim()); adding = false }) { Text("Add") } },
-                    dismissButton = { TextButton(onClick = { adding = false }) { Text("Cancel") } },
-                )
-            }
+            if (adding) NewMeasurementDialog(model) { adding = false }
         }
         item { Spacer(Modifier.height(Space.xxl)) }
     }
@@ -337,8 +348,8 @@ internal fun MuscleCard(model: AppModel, limit: Int? = null, onAll: (() -> Unit)
         onNext = { modes.getOrNull(modes.indexOf(view) + 1)?.let { slide.dir = 1; mode = it } },
     )
     LaunchedEffect(view) { openGroup = null }
-    Section("") {
-        MorphChoice(modes, view, { it }, "view") { mode = it }
+    Column(Modifier.fillMaxWidth().padding(horizontal = Space.l, vertical = Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+        Segmented(modes, view, { it }, morph = "view") { mode = it }
         when (view) {
             "Balance" -> {
                 val sets by model.muscleSetCounts.collectAsState()
@@ -351,7 +362,7 @@ internal fun MuscleCard(model: AppModel, limit: Int? = null, onAll: (() -> Unit)
                     ) { m -> sets[m]?.let { setsText(shortNumber(Math.round(it * 10) / 10.0)) } ?: "not trained" }
                 }
                 // The time frame sits under the figure, so the figure stays where it is from one view to the next.
-                RangeChoice(listOf(7L, 30L, 90L, 0L), days, { if (it == 0L) "All" else if (it == 7L) "Week" else "${it}d" }) { model.muscleDays = it }
+                Segmented(listOf(7L, 30L, 90L, 0L), days, { if (it == 0L) "All" else if (it == 7L) "Week" else "${it}d" }) { model.muscleDays = it }
                 Legend("Less", palette, "More", blended = true)
                 val ranked = Muscle.entries.sortedByDescending { sets[it] ?: 0.0 }
                 val ranges by model.setRanges.collectAsState()
@@ -458,7 +469,7 @@ internal fun MuscleCard(model: AppModel, limit: Int? = null, onAll: (() -> Unit)
                         } ?: "Body figure, sides: no difference",
                     ) { m -> credits[m]?.let { "left ${oneDecimal(it.left)} · right ${oneDecimal(it.right)}" } ?: "not trained" }
                 }
-                RangeChoice(listOf(7L, 30L, 90L, 0L), days, { if (it == 0L) "All" else if (it == 7L) "Week" else "${it}d" }) { model.muscleDays = it }
+                Segmented(listOf(7L, 30L, 90L, 0L), days, { if (it == 0L) "All" else if (it == 7L) "Week" else "${it}d" }) { model.muscleDays = it }
                 Legend("Less", palette, "More", blended = true)
                 Text("Gap: how far the lagging side is below the larger one, in % of the larger side.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 biggest?.let { (m, c) ->
@@ -915,7 +926,7 @@ fun BodyFigure(
             val target = limb?.subject ?: pressed
             Popup(offset = IntOffset(at.x.toInt(), at.y.toInt()), onDismissRequest = { shown = null }, properties = PopupProperties(focusable = true)) {
                 Surface(
-                    shape = SmallShape, color = MaterialTheme.colorScheme.surfaceContainerHighest, shadowElevation = if (clean.app.ui.theme.LocalLook.current.sheetPage) 0.dp else 6.dp,
+                    shape = SmallShape, color = MaterialTheme.colorScheme.surfaceContainerHighest, shadowElevation = 6.dp,
                     modifier = Modifier.clickable { shown = null; zoom.snap(); if (target is Head) tapHead?.invoke(target) else tap?.invoke(target as Muscle) },
                 ) {
                     Column(Modifier.padding(horizontal = Space.l, vertical = Space.s)) {

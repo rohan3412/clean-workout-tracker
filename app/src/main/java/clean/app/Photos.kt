@@ -328,7 +328,7 @@ private val THUMBS = object : LruCache<String, ImageBitmap>(12 * 1024 * 1024) {
  * Android version at no cost; the full-screen photo and Compare stay sharp.
  */
 @Composable
-private fun PhotoThumb(model: AppModel, photo: Photo, px: Int, modifier: Modifier = Modifier) {
+internal fun PhotoThumb(model: AppModel, photo: Photo, px: Int, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val id = model.activeId.collectAsState().value
     val file = remember(id, photo.name) { id?.let { PhotoFiles.file(context, it, photo.name) } }
@@ -463,73 +463,6 @@ fun AddPhotoHost(model: AppModel, show: Boolean, onDismiss: () -> Unit) {
             onDismiss()
             pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         }
-    }
-}
-
-// --- Profile ---
-
-/** How many photos the wide Progress photos card shows side by side. */
-private const val STRIP_SLOTS = 4
-
-/** A photo cropped to fill, with its day over the foot of it on a scrim that fades in from the bottom; [onClick] opens it. */
-@Composable
-private fun DatedPhoto(model: AppModel, photo: Photo, px: Int, modifier: Modifier, showDay: Boolean, onClick: () -> Unit) {
-    val scrim = MaterialTheme.colorScheme.scrim
-    Box(modifier.semantics { contentDescription = "${photo.pose.label} photo, ${prettyDay(photo.day)}"; role = Role.Button }.pressable(onClick = onClick)) {
-        // The same photo is in the timeline on the page this card opens: it travels there, resizing (both are 3:4, so it only scales).
-        PhotoThumb(model, photo, px, Modifier.fillMaxSize().morphs("photo", photo.name, scaled = true))
-        if (showDay) {
-            Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, scrim.copy(alpha = 0.7f)))).padding(start = Space.m, end = Space.m, top = Space.xxxl, bottom = Space.s)) {
-                Text(prettyDay(photo.day), color = scrim.readableOn(), style = MaterialTheme.typography.labelLarge, maxLines = 1)
-            }
-        }
-    }
-}
-
-/**
- * Profile's Progress photos card, image first. Wide: the latest four photos side by side, running to the card's edges and cropped to fill,
- * the newest with its day over it, and under them "Add photo" and (with two photos of one pose) "Compare", first against latest. Half: the
- * latest photo filling the card with its day over it. With none, a line and a way to add the first. The card opens the timeline.
- */
-@Composable
-fun ProfilePhotosCard(model: AppModel, half: Boolean) {
-    val photos by model.photos.collectAsState()
-    var adding by remember { mutableStateOf(false) }
-    AddPhotoHost(model, adding) { adding = false }
-    val open = { model.open(Screen.Photos) }
-    val latest = photos.firstOrNull()
-    if (latest == null) {
-        Section("Progress photos") {
-            EmptyPreview("Front, side and back photos taken now and then show how your body changes.", "Add a photo", { adding = true }) { PreviewSamples.Frames() }
-        }
-        return
-    }
-    if (half) {
-        Section("", inner = 0.dp, outer = Space.s, onClick = open, bleed = { DatedPhoto(model, latest, 540, Modifier.fillMaxWidth().aspectRatio(3f / 4f), true, open) }) {}
-        return
-    }
-    val pose = comparePose(photos, null)
-    Section(
-        "Progress photos", onClick = open,
-        bleed = {
-            Row(Modifier.padding(top = Space.xs), horizontalArrangement = Arrangement.spacedBy(Space.xxs)) {
-                for (slot in 0 until STRIP_SLOTS) {
-                    val photo = photos.getOrNull(slot)
-                    val cell = Modifier.weight(1f).aspectRatio(3f / 4f)
-                    if (photo == null) Box(cell.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)))
-                    else DatedPhoto(model, photo, 360, cell, slot == 0) { model.open(Screen.Photo(photo.name, null)) }
-                }
-            }
-            Row(Modifier.padding(horizontal = Space.l, vertical = Space.m), horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
-                QuietButton("Add photo", { adding = true })
-                if (pose != null) QuietButton("Compare first and latest", { model.open(Screen.PhotoCompare(pose)) })
-            }
-        },
-    ) {
-        Text(
-            "${plural(photos.size, "photo")}, latest ${agoText(latest.day, java.time.LocalDate.now()).lowercase()}",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
 

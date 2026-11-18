@@ -5,6 +5,7 @@ import androidx.compose.ui.draw.clip
 
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import clean.app.ui.theme.LocalTextScale
+import clean.app.ui.theme.cardShape
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.platform.LocalContext
@@ -68,7 +69,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.FilterChip
@@ -111,6 +111,9 @@ import clean.core.Workout
 import clean.core.otherNames
 import clean.core.SearchTarget
 import clean.core.SearchQuery
+import clean.core.LibraryEntry
+import clean.core.rankLibrary
+import clean.core.nearestName
 import clean.core.recordsOf
 import java.time.LocalDate
 import kotlinx.coroutines.launch
@@ -119,7 +122,36 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /** [own] marks an exercise the user made or changed that has not been logged yet. */
-data class ExerciseSummary(val name: String, val sessions: Int, val lastDate: String, val own: Boolean = false)
+data class ExerciseSummary(
+    val name: String, val sessions: Int, val lastDate: String, val own: Boolean = false,
+    /** Sessions in the last 12 weeks. */
+    val recent: Int = 0,
+    /** The best working set ever logged (kg, reps, seconds), for the grey line under the name. */
+    val bestWeight: Double? = null, val bestReps: Int? = null, val bestSeconds: Double? = null,
+)
+
+/** Whether [a] is a better set than [b]: the higher Epley figure, then more reps, then longer. */
+private fun betterSet(a: SetItem, b: SetItem?): Boolean {
+    if (b == null) return true
+    val ka = (a.weight ?: 0.0) * (1 + (a.reps ?: 0) / 30.0)
+    val kb = (b.weight ?: 0.0) * (1 + (b.reps ?: 0) / 30.0)
+    if (ka != kb) return ka > kb
+    if ((a.reps ?: 0) != (b.reps ?: 0)) return (a.reps ?: 0) > (b.reps ?: 0)
+    return (a.seconds ?: 0.0) > (b.seconds ?: 0.0)
+}
+
+/** "100 × 6", "12 reps" or "45s": the best set as the Library's grey line shows it; null when the sets hold no figure. */
+fun bestSetLine(e: ExerciseSummary, unit: String): String? {
+    val w = e.bestWeight?.takeIf { it > 0 }
+    val r = e.bestReps?.takeIf { it > 0 }
+    return when {
+        w != null && r != null -> "${showWeight(w, unit)} × $r"
+        w != null -> showWeight(w, unit)
+        r != null -> "$r reps"
+        e.bestSeconds != null && e.bestSeconds > 0 -> duration(e.bestSeconds.toLong())
+        else -> null
+    }
+}
 
 private val EQUIPMENT = listOf("Barbell", "Dumbbell", "Cable", "Machine", "Bodyweight", "Other")
 
@@ -140,12 +172,22 @@ private fun equipmentOf(name: String): String {
 /** Every exercise that has been logged, most used first. */
 fun exerciseSummaries(workouts: List<Workout>): List<ExerciseSummary> {
     val count = HashMap<String, Int>()
+    val recent = HashMap<String, Int>()
     val last = HashMap<String, String>()
-    for (w in workouts) for (name in w.blocks.mapTo(HashSet()) { it.exercise }) {
-        count[name] = (count[name] ?: 0) + 1
-        last[name] = w.date
+    val best = HashMap<String, SetItem>()
+    val since = LocalDate.now().minusWeeks(12).toString()
+    for (w in workouts) {
+        for (name in w.blocks.mapTo(HashSet()) { it.exercise }) {
+            count[name] = (count[name] ?: 0) + 1
+            if (w.date >= since) recent[name] = (recent[name] ?: 0) + 1
+            last[name] = w.date
+        }
+        for (b in w.blocks) for (set in b.sets) if (set.type != SetType.WARMUP && betterSet(set, best[b.exercise])) best[b.exercise] = set
     }
-    return count.map { (name, n) -> ExerciseSummary(name, n, last.getValue(name)) }.sortedWith(compareByDescending<ExerciseSummary> { it.sessions }.thenBy { it.name })
+    return count.map { (name, n) ->
+        val b = best[name]
+        ExerciseSummary(name, n, last.getValue(name), recent = recent[name] ?: 0, bestWeight = b?.weight, bestReps = b?.reps, bestSeconds = b?.seconds)
+    }.sortedWith(compareByDescending<ExerciseSummary> { it.sessions }.thenBy { it.name })
 }
 
 /** The user's exercises, most used first, then every built-in exercise they have not logged yet. */
@@ -157,52 +199,70 @@ fun allExercises(workouts: List<Workout>, own: Collection<String> = emptyList())
     return used + made + LIBRARY.filter { it.name !in names }.map { ExerciseSummary(it.name, 0, "") }
 }
 
-/** One row of the exercise list: a section heading or an exercise. [key] is unique across the list. */
-private class ListRow(val key: String, val heading: String?, val exercise: ExerciseSummary?, val letter: Char?)
+/** One row of the exercise list: a heading, an exercise or a link ("Show all 23"). [key] is unique across the list. */
+private class ListRow(val key: String, val heading: String?, val exercise: ExerciseSummary?, val letter: Char?, val link: String? = null)
 
 private fun letterOf(name: String): Char = name.firstOrNull()?.uppercaseChar()?.takeIf { it in 'A'..'Z' } ?: '#'
 
-/** A list made for [query]. */
-private class Made(val query: String, val rows: List<ListRow>)
+/** A list made for [query]; [suggestion] is the nearest name when nothing matched. */
+private class Made(val query: String, val rows: List<ListRow>, val suggestion: String? = null)
+
+/** What search reads of every exercise, worked out once per list: the entries `rankLibrary` ranks and the summary of each name. */
+private class Index(val entries: List<LibraryEntry>, val byName: Map<String, ExerciseSummary>)
+
+/** How many of the most recent exercises Recent shows before "Show all". */
+private const val RECENT_SHOWN = 5
+
+/** Whether Recent shows every performed exercise instead of five; kept while the app runs (Library and pickers alike). */
+private var recentExpanded by mutableStateOf(false)
 
 /**
- * The rows of the exercise list: with nothing typed, Favourites, Recent and A to Z under letters; with [q] typed, one list ranked by
- * `SearchQuery` (every word anywhere in any order, shorthand and small slips allowed), then the most done and most recent. Run off
- * the main thread; [stillWanted] throws when the query it was made for has been replaced, which stops it.
+ * The rows of the exercise list: with nothing typed, Favourites, Recent (five, or all) and A to Z under letters; with [q] typed, the two
+ * groups of `rankLibrary` ("You've done these", "More in the library"). Run off the main thread; [stillWanted] throws when the query it
+ * was made for has been replaced, which stops it.
  */
 private fun listRows(
-    all: List<ExerciseSummary>, q: String, targets: Map<String, SearchTarget>?, muscle: Muscle?, equipment: String?,
-    hiding: Boolean, performed: Boolean, favourites: Set<String>, musclesOf: (String) -> MuscleUse, stillWanted: () -> Unit = {},
+    all: List<ExerciseSummary>, q: String, index: Index?, muscle: Muscle?, equipment: String?,
+    hiding: Boolean, performed: Boolean, onlyFavourites: Boolean, favourites: Set<String>, musclesOf: (String) -> MuscleUse,
+    expanded: Boolean, stillWanted: () -> Unit = {},
 ): List<ListRow> {
     val search = SearchQuery(q)
-    val ranks = HashMap<String, Int>()
-    if (!search.blank && targets != null) for ((i, e) in all.withIndex()) {
-        if (i % 128 == 0) stillWanted()
-        search.rank(targets.getValue(e.name))?.let { ranks[e.name] = it }
+    val list = mutableListOf<ListRow>()
+    // A search is one ranked list in two groups: no letters.
+    if (!search.blank && index != null) {
+        val result = rankLibrary(
+            search, index.entries,
+            keep = { e ->
+                (muscle == null || muscle in musclesOf(e.name).primary) && (equipment == null || equipmentOf(e.name) == equipment) &&
+                    (!performed || e.performed) && (!onlyFavourites || e.favourite)
+            },
+            stillWanted = stillWanted,
+        )
+        if (result.done.isNotEmpty()) list += ListRow("h:done", "You've done these", null, null)
+        result.done.mapTo(list) { ListRow("a:${it.name}", null, index.byName.getValue(it.name), null) }
+        if (result.more.isNotEmpty()) {
+            if (result.done.isNotEmpty()) list += ListRow("h:more", "More in the library", null, null)
+            result.more.mapTo(list) { ListRow("a:${it.name}", null, index.byName.getValue(it.name), null) }
+        }
+        return list
     }
     val shown = all.filter { e ->
-        (search.blank || e.name in ranks) &&
-            (muscle == null || muscle in musclesOf(e.name).primary) &&
+        (muscle == null || muscle in musclesOf(e.name).primary) &&
             (equipment == null || equipmentOf(e.name) == equipment) &&
             (!performed || e.sessions > 0) &&
+            (!onlyFavourites || e.name in favourites) &&
             (!hiding || e.sessions > 0 || e.own)
-    }
-    val list = mutableListOf<ListRow>()
-    // A search is one list, best match first, then the most done and most recent: no letters.
-    if (!search.blank) {
-        shown.sortedWith(compareBy<ExerciseSummary> { ranks.getValue(it.name) }.thenByDescending { it.sessions }.thenByDescending { it.lastDate }.thenBy { it.name.lowercase() })
-            .mapTo(list) { ListRow("a:${it.name}", null, it, null) }
-        return list
     }
     val starred = shown.filter { it.name in favourites }.sortedBy { it.name.lowercase() }
     if (starred.isNotEmpty()) {
         list += ListRow("h:favourites", "Favourites", null, null)
         starred.mapTo(list) { ListRow("f:${it.name}", null, it, null) }
     }
-    val recent = shown.filter { it.sessions > 0 }.sortedByDescending { it.lastDate }.take(8)
-    if (recent.isNotEmpty()) {
+    val done = shown.filter { it.sessions > 0 }.sortedByDescending { it.lastDate }
+    if (done.isNotEmpty()) {
         list += ListRow("h:recent", "Recent", null, null)
-        recent.mapTo(list) { ListRow("r:${it.name}", null, it, null) }
+        (if (expanded) done else done.take(RECENT_SHOWN)).mapTo(list) { ListRow("r:${it.name}", null, it, null) }
+        if (done.size > RECENT_SHOWN) list += ListRow("h:recent-more", null, null, null, link = if (expanded) "Show fewer" else "Show all ${done.size}")
     }
     var letter: Char? = null
     // The names are lower-cased once for the sort, not once per comparison.
@@ -218,10 +278,11 @@ private fun listRows(
 }
 
 /**
- * Search box, a muscle filter and the list: the exercises done most recently first, then everything
- * from A to Z, with a letter rail on the right that jumps to a letter and marks the one in view.
- * [musclesOf] gives the muscles an exercise trains, for the filter and the subtitle.
+ * The Library's list (and the pickers'): search box, the filter chips Muscle, Equipment, Performed and Favourites, and the rows; at
+ * rest Favourites, Recent and A to Z with a letter rail on the right that jumps to a letter and marks the one in view; while typing
+ * one ranked list. [musclesOf] gives the muscles an exercise trains, for the filter and the grey line under a name never done.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ExerciseList(
     all: List<ExerciseSummary>,
@@ -232,14 +293,19 @@ fun ExerciseList(
     /** Offer [onCreate] only when nothing matches what was typed; by default it is offered whenever the typed name is not an exercise. */
     createWhenEmpty: Boolean = false,
     leading: @Composable () -> Unit = {},
-    onMuscle: ((Muscle) -> Unit)? = null,
     favourites: Set<String> = emptySet(),
     hideLibrary: Boolean = false,
-    /** "all" or "performed" with a way to change it: the two choices are then shown above the list (the Exercises tab); null leaves the list as it is. */
-    show: String? = null,
-    onShow: ((String) -> Unit)? = null,
+    /** The Performed chip, when its state is kept by the caller (the Library remembers it); null keeps it here. */
+    performedOnly: Boolean? = null,
+    onPerformedOnly: ((Boolean) -> Unit)? = null,
+    /** The unit an exercise's best set is shown in. */
+    unitOf: (String) -> String = { "kg" },
     /** The tab this list is the page of, when it is one: it tells the tab bar when it is at its end. */
     tab: clean.app.Tab? = null,
+    /** The Library keeps the scroll position of its list here; a picker keeps its own. */
+    listState: androidx.compose.foundation.lazy.LazyListState? = null,
+    /** What a hold on a row offers (B5); none in a picker. */
+    rowActions: ((String) -> List<HoldAction>)? = null,
     /**
      * Ticked names, when several can be picked: each row then has a tick box that [onTick] turns, and while any is ticked a tap on a
      * row ticks it too (with none, a tap still picks the one).
@@ -250,107 +316,128 @@ fun ExerciseList(
     var query by remember { mutableStateOf("") }
     var muscle by remember { mutableStateOf<Muscle?>(null) }
     var equipment by remember { mutableStateOf<String?>(null) }
+    var onlyFavourites by remember { mutableStateOf(false) }
+    var localPerformed by remember { mutableStateOf(false) }
+    var pickingMuscle by remember { mutableStateOf(false) }
+    var pickingEquipment by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val thumbs = remember { Animations.count(context) > 0 }
-    // The filter chips stay out of the way until asked for.
-    var filtering by remember { mutableStateOf(false) }
     var showAll by remember { mutableStateOf(false) }
-    // With nothing typed or filtered, built-in exercises never used are left out.
-    val performed = show == "performed"
-    // "Performed" already leaves out what was never logged, so the built-in note and its count are not needed.
-    val hiding = hideLibrary && !performed && !showAll && query.isBlank() && muscle == null && equipment == null
+    val performed = performedOnly ?: localPerformed
+    fun setPerformed(on: Boolean) { if (onPerformedOnly != null) onPerformedOnly(on) else localPerformed = on }
+    val anyFilter = muscle != null || equipment != null || performed || onlyFavourites
+    // With nothing typed or filtered, built-in exercises never used are left out. "Performed" already leaves out what was never logged, so the note and its count are not needed.
+    val hiding = hideLibrary && !performed && !showAll && query.isBlank() && muscle == null && equipment == null && !onlyFavourites
     val hidden = if (hiding) all.count { it.sessions == 0 && !it.own } else 0
-    // What search reads of each exercise, worked out once per list: other names ("skull crusher" finds Skullcrusher, another app's
-    // name finds ours), main muscles and equipment.
+    val expanded = recentExpanded
     // What search reads of each exercise (other names, so "skull crusher" finds Skullcrusher and another app's name finds ours; main
-    // muscles; equipment), worked out once per list, off the main thread.
-    val targets by produceState<Map<String, SearchTarget>?>(null, all, musclesOf) {
+    // muscles; equipment; what the user has done with it), worked out once per list, off the main thread.
+    val index by produceState<Index?>(null, all, musclesOf, favourites) {
         value = withContext(Dispatchers.Default) {
-            all.associate { e -> e.name to SearchTarget(e.name, otherNames(e.name), musclesOf(e.name).primary.map { it.label } + equipmentOf(e.name)) }
+            Index(
+                all.map { e -> LibraryEntry(e.name, otherNames(e.name), musclesOf(e.name).primary.map { it.label } + equipmentOf(e.name), e.name in favourites, e.sessions, e.recent, e.lastDate) },
+                all.associateBy { it.name },
+            )
         }
     }
     // The list is made off the main thread and the newest keystroke wins (a new query cancels the one still running); until it is
     // ready the list as it was stays on screen. The first list, with nothing typed, is made at once so the page never opens empty.
     val made by produceState(
-        remember { Made("", listRows(all, "", null, muscle, equipment, hiding, performed, favourites, musclesOf)) },
-        all, query, muscle, equipment, hiding, performed, favourites, targets,
+        remember { Made("", listRows(all, "", null, muscle, equipment, hiding, performed, onlyFavourites, favourites, musclesOf, expanded)) },
+        all, query, muscle, equipment, hiding, performed, onlyFavourites, favourites, index, expanded,
     ) {
         val q = query.trim()
-        if (q.isNotEmpty() && targets == null) return@produceState
-        value = withContext(Dispatchers.Default) { Made(q, listRows(all, q, targets, muscle, equipment, hiding, performed, favourites, musclesOf) { ensureActive() }) }
+        val idx = index
+        if (q.isNotEmpty() && idx == null) return@produceState
+        value = withContext(Dispatchers.Default) {
+            val rows = listRows(all, q, idx, muscle, equipment, hiding, performed, onlyFavourites, favourites, musclesOf, expanded) { ensureActive() }
+            Made(q, rows, if (q.isNotEmpty() && idx != null && rows.none { it.exercise != null }) nearestName(q, idx.entries) else null)
+        }
     }
     val rows = made.rows
     val letters = remember(rows) { rows.filter { it.heading != null && it.letter != null }.map { it.letter!! } }
-    val state = rememberLazyListState()
+    val state = listState ?: rememberLazyListState()
     if (tab != null) BarEnd(tab, state)
     val scope = rememberCoroutineScope()
-    // One extra item sits above the rows when a new name can be created.
     val name = query.trim()
-    val creating = onCreate != null && name.isNotEmpty() && all.none { it.name == name } && (!createWhenEmpty || made.query == name && rows.none { it.exercise != null })
-    val offset = if (creating) 1 else 0
+    // Nothing found for what is typed (the list is the one made for it): say so, offer the nearest name and, below, to create it.
+    val nothingFound = name.isNotEmpty() && made.query == name && rows.none { it.exercise != null }
+    val creating = onCreate != null && name.isNotEmpty() && all.none { it.name == name } && (!createWhenEmpty || nothingFound)
+    // One extra item sits above the rows when a new name can be created.
+    val offset = if (creating && !nothingFound) 1 else 0
     val current by remember(rows, offset) { derivedStateOf { rows.getOrNull(state.firstVisibleItemIndex - offset)?.letter } }
+
+    if (pickingMuscle) Sheet({ pickingMuscle = false }, "Muscle") {
+        SheetRow("Any muscle", if (muscle == null) CleanIcons.Check else null) { muscle = null; pickingMuscle = false }
+        for (m in Muscle.entries) SheetRow(m.label, if (muscle == m) CleanIcons.Check else null) { muscle = m; pickingMuscle = false }
+    }
+    if (pickingEquipment) Sheet({ pickingEquipment = false }, "Equipment") {
+        SheetRow("Any equipment", if (equipment == null) CleanIcons.Check else null) { equipment = null; pickingEquipment = false }
+        for (e in EQUIPMENT) SheetRow(e, if (equipment == e) CleanIcons.Check else null) { equipment = e; pickingEquipment = false }
+    }
 
     Column(modifier) {
         Row(Modifier.padding(horizontal = Space.s, vertical = Space.xs), verticalAlignment = Alignment.CenterVertically) {
             leading()
-            val searchLook = LocalLook.current
-            val linenField = searchLook.sheetPage
-            val hairline = searchLook.divider ?: searchLook.muted
             OutlinedTextField(
-                query, { query = it }, placeholder = { Text("Search ${all.size} exercises") }, singleLine = true, modifier = Modifier.weight(1f).padding(horizontal = Space.s),
-                // Linen: fully round, outlined by the hairline.
-                shape = if (linenField) androidx.compose.foundation.shape.CircleShape else OutlinedTextFieldDefaults.shape,
-                colors = if (linenField) OutlinedTextFieldDefaults.colors(unfocusedBorderColor = hairline, focusedBorderColor = hairline) else OutlinedTextFieldDefaults.colors(),
+                query, { query = it }, placeholder = { Text("Search ${String.format(java.util.Locale.US, "%,d", all.size)} exercises") }, singleLine = true,
+                modifier = Modifier.weight(1f).padding(horizontal = Space.s),
             )
-            val active = listOfNotNull(muscle, equipment).size
-            TextButton(onClick = { filtering = !filtering }) { Text(if (active > 0) "Filter ($active)" else "Filter") }
         }
-        if (onShow != null) Box(Modifier.padding(horizontal = Space.l)) { Choice(listOf("all", "performed"), show ?: "all", { if (it == "all") "All" else "Performed" }, onShow) }
-        if (filtering) {
-            LazyRow(contentPadding = PaddingValues(horizontal = Space.l), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                items(Muscle.entries) { m ->
-                    CleanChip(selected = muscle == m, onClick = { muscle = if (muscle == m) null else m }, label = { Text(m.label) })
-                }
-            }
-            LazyRow(contentPadding = PaddingValues(horizontal = Space.l), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                items(EQUIPMENT) { e ->
-                    CleanChip(selected = equipment == e, onClick = { equipment = if (equipment == e) null else e }, label = { Text(e) })
-                }
-            }
+        // The chips wrap onto a second line instead of running off the screen edge.
+        FlowRow(Modifier.padding(horizontal = Space.l), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            CleanChip(muscle != null, { pickingMuscle = true }, { Text(muscle?.label ?: "Muscle") })
+            CleanChip(equipment != null, { pickingEquipment = true }, { Text(equipment ?: "Equipment") })
+            CleanChip(performed, { setPerformed(!performed) }, { Text("Performed") })
+            CleanChip(onlyFavourites, { onlyFavourites = !onlyFavourites }, { Text("Favourites") })
+            if (anyFilter) CleanChip(false, { muscle = null; equipment = null; onlyFavourites = false; setPerformed(false) }, { Text("Clear all") })
         }
         Box(Modifier.fillMaxSize()) {
             LazyColumn(Modifier.fillMaxSize().padding(end = Space.xxl), state = state) {
+                if (nothingFound) {
+                    item(key = "none") {
+                        Text("No exercise called “$name”", Modifier.fillMaxWidth().padding(start = Space.l, end = Space.l, top = Space.l, bottom = Space.s), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    made.suggestion?.let { near ->
+                        item(key = "near") {
+                            Text("Did you mean $near?", Modifier.fillMaxWidth().clickable { query = near }.padding(Space.l), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
                 if (creating) {
                     item(key = "create") {
                         Text("Create “$name”", Modifier.fillMaxWidth().clickable { onCreate!!(name) }.padding(Space.l), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     }
                 }
+                if (name.isEmpty() && anyFilter && rows.none { it.exercise != null }) item(key = "nofilter") {
+                    Text("No exercise fits these filters.", Modifier.fillMaxWidth().padding(Space.l), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 items(rows, key = { it.key }) { row ->
                     val exercise = row.exercise
-                    if (exercise == null) {
-                        Text(row.heading.orEmpty(), Modifier.padding(start = Space.l, top = Space.l, bottom = Space.xs), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    if (row.link != null) {
+                        Text(row.link, Modifier.fillMaxWidth().clickable { recentExpanded = !recentExpanded }.padding(Space.l), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        HorizontalDivider()
+                    } else if (exercise == null) {
+                        Caption(row.heading.orEmpty(), Modifier.fillMaxWidth().padding(start = Space.l, top = Space.l, bottom = Space.xs))
                     } else {
-                        // On the Exercises tab each row is a container that grows into the exercise's page; a picker (no tab) keeps the plain row.
+                        // On the Library tab each row is a container that grows into the exercise's page; a picker (no tab) keeps the plain row.
                         val rowKey = if (tab != null) "exercises:${row.key}" else null
                         CompositionLocalProvider(LocalCardKey provides rowKey) {
                         val open = cardTap { onClick(exercise.name) }
-                        Row((if (rowKey != null) Modifier.opensInto(null, androidx.compose.ui.graphics.Color.Transparent, square = true) else Modifier).fillMaxWidth().then(Modifier.clickable { if (!ticked.isNullOrEmpty()) onTick(exercise.name) else open() }).padding(start = Space.l, end = if (ticked != null) Space.xs else Space.l, top = Space.s, bottom = Space.s), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                        Row((if (rowKey != null) Modifier.opensInto(null, androidx.compose.ui.graphics.Color.Transparent, square = true) else Modifier).fillMaxWidth().then(Modifier.clickable { if (!ticked.isNullOrEmpty()) onTick(exercise.name) else open() }).holdMenu(cardShape(), rowActions?.let { f -> { f(exercise.name) } }).padding(start = Space.l, end = if (ticked != null) Space.xs else Space.l, top = Space.s, bottom = Space.s), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                         // With animations on the phone, each exercise that has one shows a still of it.
                         if (thumbs) ExerciseThumb(exercise.name)
                         Column(Modifier.weight(1f)) {
+                            // The name wraps and is never cut.
                             MorphText(androidx.compose.ui.text.AnnotatedString(exercise.name), "title", style = MaterialTheme.typography.bodyLarge)
-                            val main = musclesOf(exercise.name).primary
-                            if (exercise.sessions == 0 && onMuscle != null && main.isNotEmpty()) {
-                                // In the Exercises tab a muscle under a name opens that muscle's page.
-                                Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-                                    for (m in main) Text(m.label, Modifier.clickable { onMuscle(m) }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            } else Text(
-                                if (exercise.sessions > 0) "${exercise.sessions} sessions · last ${prettyDay(exercise.lastDate)}"
-                                else main.joinToString { it.label }.ifEmpty { "Not logged yet" },
+                            // Done: its last day and best set. Never done: its main muscle and equipment.
+                            Text(
+                                if (exercise.sessions > 0) listOfNotNull(prettyDay(exercise.lastDate), bestSetLine(exercise, unitOf(exercise.name))).joinToString(" · ")
+                                else listOfNotNull(musclesOf(exercise.name).primary.firstOrNull()?.label, equipmentOf(exercise.name).takeIf { it != "Other" }).joinToString(" · ").ifEmpty { "Not logged yet" },
                                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        if (exercise.name in favourites) Icon(CleanIcons.StarLine, "Favourite", Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                         if (ticked != null) androidx.compose.material3.Checkbox(exercise.name in ticked, { onTick(exercise.name) }, Modifier.semantics { contentDescription = "Pick ${exercise.name}" })
                         }
                         }
@@ -407,8 +494,8 @@ fun ExercisesTab(model: AppModel) {
     val workouts by model.workouts.collectAsState()
     val settings by model.settings.collectAsState()
     val all = remember(workouts, settings) { allExercises(workouts, settings.keys) }
-    val hide = model.flag("library.hide")
-    // "All" or "Performed" (at least one logged session in this profile), remembered.
+    val hide = true // Built-in exercises stay out of the list until searched for (the old Lists choice is fixed since 1.1.0).
+    // The Performed chip (at least one logged session in this profile), remembered under the old key.
     var show by model.remembered("exercises.show", "all")
     var creating by remember { mutableStateOf(false) }
     if (creating) {
@@ -448,19 +535,27 @@ fun ExercisesTab(model: AppModel) {
             dismissButton = { TextButton(onClick = { creating = false }) { Text("Cancel") } },
         )
     }
-    val pinned = pinsTitle()
-    val header: @Composable () -> Unit = { Title("Exercises") { HeaderButton(CleanIcons.Add, "New exercise", { creating = true }, main = true) } }
-    SheetTab(header) {
+    val header: @Composable () -> Unit = { Title("Library") { IconButton(onClick = { creating = true }) { Icon(CleanIcons.Add, "New exercise") } } }
+    Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize()) {
-        if (!pinned) header() else androidx.compose.foundation.layout.Spacer(Modifier.height(Space.l))
+        header()
         // Keyed on the settings so the list follows a change made on an exercise's page.
         val musclesOf = remember(settings) { { name: String -> model.musclesOf(name) } }
         ExerciseList(
-            all, musclesOf, onClick = { model.open(Screen.ExerciseDetail(it)) }, onMuscle = { model.open(Screen.MuscleDetail(it)) },
+            all, musclesOf, onClick = { model.open(Screen.ExerciseDetail(it)) }, unitOf = model::unitOf,
             // A search that finds nothing offers to make the exercise, as the New exercise button does.
             onCreate = { made -> model.putSetting(made) { it }; model.open(Screen.ExerciseDetail(made, edit = true)) }, createWhenEmpty = true,
             favourites = settings.filterValues { it.favourite }.keys, hideLibrary = hide, tab = clean.app.Tab.Exercises,
-            show = show, onShow = { show = it },
+            listState = model.tabLists.getValue(clean.app.Tab.Exercises),
+            rowActions = { name ->
+                val starred = settings[name]?.favourite == true
+                listOf(
+                    HoldAction("Open", CleanIcons.Forward) { model.open(Screen.ExerciseDetail(name)) },
+                    HoldAction(if (starred) "Unfavourite" else "Favourite", if (starred) CleanIcons.Star else CleanIcons.StarLine) { model.putSetting(name) { it.copy(favourite = !starred) } },
+                    HoldAction("Edit", CleanIcons.Edit) { model.open(Screen.ExerciseDetail(name, edit = true)) },
+                )
+            },
+            performedOnly = show == "performed", onPerformedOnly = { show = if (it) "performed" else "all" },
         )
     }
     }
@@ -581,7 +676,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
         jumpTo = null
     }
     var progressing by remember { mutableStateOf(false) }
-    val plateau = model.flag("exercise.plateau")
+    val plateau = true
     // The goal as a level on the chart it applies to: the estimated 1RM it stands for, or, past the rep limit, the weight.
     fun goalLine(chart: String): Double? {
         val (kg, reps) = goal ?: return null
@@ -613,7 +708,6 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
     }
     Scaffold(containerColor = pageContainer(), topBar = {
       Column {
-        RegisterSheetBar(48.dp)
         BackBar(name, model::back) {
             // A favourite sits above everything else in the list and in pickers.
             val starred = settings[name]?.favourite == true
@@ -912,8 +1006,6 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                     val (_, chartUnit, value) = charts[chart.coerceIn(charts.indices)]
                     val from = if (range == 0L) null else LocalDate.now().minusDays(range)
                     val points = chartPoints(sideProgress, from, value)
-                    // Linen: the latest value as a big light figure over the chart.
-                    if (chart >= 0 && chart != IMBALANCE_CHART && points.isNotEmpty()) BigNumber(shortNumber(Math.round(points.last().value * 10) / 10.0), chartUnit)
                     val openDay = { day: LocalDate -> sessions.lastOrNull { it.date.startsWith(day.toString()) }?.let { model.open(Screen.WorkoutDetail(it.date)) }; Unit }
                     if (chart == IMBALANCE_CHART) {
                         val gaps = imbalanceSeries(sideProgress, from)
@@ -1016,7 +1108,7 @@ fun ExerciseDetailScreen(model: AppModel, name: String, startEditing: Boolean = 
                 CompositionLocalProvider(LocalCardKey provides "page:exercise:$name:${session.date}") {
                 Section("", onClick = { model.open(Screen.WorkoutDetail(session.date)) }, spacing = Space.xs, inner = Space.s, outer = Space.xs) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        MorphText(workout?.name ?: "Workout", "title", Modifier.weight(1f), fontWeight = FontWeight.Bold, maxLines = 1)
+                        MorphText(workout?.name ?: "Workout", "title", Modifier.weight(1f), fontWeight = FontWeight.Bold, maxLines = 2)
                         Text(prettyDay(session.date), style = small, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Column {

@@ -59,4 +59,4 @@ Not built. The plan is to make `core/` Kotlin Multiplatform first, then the scre
 
 ## Licence
 
-Clean's own code is under the MIT licence (`LICENSE`). Third-party material (MuscleMap outlines, exercise text, Inter and IBM Plex Mono) is credited in `NOTICE.md`.
+Clean's own code is under the MIT licence (`LICENSE`). Third-party material (MuscleMap outlines, exercise text, Inter) is credited in `NOTICE.md`.

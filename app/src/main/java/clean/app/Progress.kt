@@ -4,11 +4,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Icon
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.contentDescription
@@ -54,7 +57,8 @@ import clean.core.muscleSets
 import clean.core.percentChange
 import clean.core.periodRange
 import clean.core.previousRange
-import clean.core.topExercise
+import clean.core.previousName
+import clean.core.comparisonSentence
 import clean.core.totalsIn
 import clean.core.volumeBuckets
 import clean.core.volumeOf
@@ -89,10 +93,9 @@ private val SHORT_DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM")
 /** A page in miniature: its name, a little of what is on it, and the whole card opens it (nothing inside takes a tap of its own). */
 @Composable
 private fun MiniPage(title: String, value: String, modifier: Modifier, key: String, onClick: () -> Unit, content: @Composable ColumnScope.() -> Unit) = CompositionLocalProvider(LocalCardKey provides key) {
-    val edge = cardBorder()
     val fill = cardFill()
-    Card(modifier.clip(cardShape()).pressable(onClick = cardTap(onClick)), shape = cardShape(), colors = CardDefaults.cardColors(containerColor = fill), border = edge) {
-        Column(Modifier.opensInto(edge, fill).padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
+    Card(modifier.cardDepth(cardShape()).clip(cardShape()).pressable(onClick = cardTap(onClick)), shape = cardShape(), colors = CardDefaults.cardColors(containerColor = fill)) {
+        Column(Modifier.opensInto(null, fill).padding(Space.m), verticalArrangement = Arrangement.spacedBy(Space.s)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
                 SectionTitle(title, role = "title")
                 if (value.isNotEmpty()) Text(value, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -158,7 +161,7 @@ private fun ColumnScope.HistoryRows(model: AppModel) {
             Row(Modifier.morphs("row:out", w.date, late = true), horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
                 MorphText(androidx.compose.ui.text.AnnotatedString(w.name), "row:name", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, id = w.date)
                 if (count > 0) Row(Modifier.morphs("row:prs", w.date).semantics(mergeDescendants = true) { contentDescription = "${shortNumber(count)} PRs" }, verticalAlignment = Alignment.CenterVertically) {
-                    Icon(CleanIcons.Star, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
+                    Icon(CleanIcons.StarLine, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
                     Text(shortNumber(count), maxLines = 1, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
                 }
                 MorphText(androidx.compose.ui.text.AnnotatedString(LocalDate.parse(w.day).format(SHORT_DAY)), "row:date", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, id = w.date)
@@ -176,13 +179,11 @@ private fun ColumnScope.HistoryRows(model: AppModel) {
 @Composable
 fun ProgressTab(model: AppModel) {
     val workouts by model.workouts.collectAsState()
-    val state = rememberLazyListState()
+    val state = model.tabLists.getValue(Tab.Progress)
     BarEnd(Tab.Progress, state)
-    val pinned = pinsTitle()
-    SheetTab({ Title("Progress") }) {
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(Modifier.fillMaxSize(), state) {
-        if (!pinned) item { Title("Progress") }
-        sheetGap(pinned)
+        item { Title("Progress") }
         item {
             // The two stand as tall as each other; the figure sets the height and the rows take what room there is.
             Twins(Modifier.fillMaxWidth().padding(horizontal = Space.m), 8.dp) {
@@ -193,21 +194,12 @@ fun ProgressTab(model: AppModel) {
                 MiniPage("Body", "", Modifier, "progress:body", { model.open(Screen.Body) }) { BodyMini(model) }
             }
         }
-        item { CompositionLocalProvider(LocalCardKey provides "progress:activity") { ActivityCard(model) } }
-        item { StatisticsCard(model) }
+        item { StatisticsSection(model) }
         item { BarSpace() }
     }
     }
 }
 
-/** A line with a name at the left and what it found at the right (ellipsised), opening the page of that thing. */
-@Composable
-private fun TopRow(label: String, value: String, key: String, onClick: () -> Unit) = CompositionLocalProvider(LocalCardKey provides key) {
-    Row(Modifier.opensInto(null, cardFill(), square = true).fillMaxWidth().clickable(onClick = cardTap(onClick)).minTouch(), horizontalArrangement = Arrangement.spacedBy(Space.m), verticalAlignment = Alignment.CenterVertically) {
-        MorphText(androidx.compose.ui.text.AnnotatedString(label), "title", style = MaterialTheme.typography.bodyMedium)
-        Text("$value ›", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
 
 private val DAY_NAME: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM")
 private val MONTH_NAME: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM yyyy")
@@ -232,7 +224,7 @@ private fun endName(period: StatsPeriod, b: VolumeBucket): String = when {
 @Composable
 private fun VolumeBars(buckets: List<VolumeBucket>, spoken: String) {
     val color = MaterialTheme.colorScheme.primary
-    val quiet = color.copy(alpha = 0.35f)
+    val quiet = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.22f)
     val faint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
     // Another period stretches the bars: each grows or shrinks to its new height while it slides into its new slot (Motion.STRETCH).
     val motion = LocalMotion.current
@@ -280,22 +272,35 @@ private fun VolumeBars(buckets: List<VolumeBucket>, spoken: String) {
     )
 }
 
-/** What the Statistics card shows for one period, worked out together. */
-private class Figures(
-    val now: PeriodTotals, val before: PeriodTotals?, val buckets: List<VolumeBucket>,
-    val exercise: Pair<String, Double>?, val muscle: Pair<Muscle, Double>?,
-)
+/** What the statistics section shows for one period, worked out together. */
+private class Figures(val now: PeriodTotals, val before: PeriodTotals?, val buckets: List<VolumeBucket>)
+
+/** One of the four numbers: the figure large (it rolls when it changes) with its small grey name under it. */
+@Composable
+private fun StatNumber(label: String, value: String, modifier: Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(Space.xxs)) {
+        RollingText(value, "stats:$label", MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+    }
+}
+
+/** A row that opens a page, hairline under it; with a key it grows into its page. */
+@Composable
+private fun StatRow(title: String, value: String, key: String, last: Boolean = false, onClick: () -> Unit) {
+    NavRow(title, value, onClick, key)
+    if (!last) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+}
 
 /**
- * Progress's Statistics card: a period (Week, Month, Year, All; kept), four hero numbers with their change against the same elapsed
- * days of the period before, a volume chart over the period, its most trained muscle and top exercise, then the pages of statistics.
+ * Progress's statistics, laid out on the page with no card (1.1.0, D2): a period (Week, Month, Year, All; kept), the four numbers in one row,
+ * one sentence against the same elapsed part of the period before, the volume bars, then the rows that open the pages of statistics.
  */
 @Composable
-private fun StatisticsCard(model: AppModel) {
+private fun StatisticsSection(model: AppModel) {
     val workouts by model.workouts.collectAsState()
     val profile by model.profile.collectAsState()
     val consistency by model.consistency.collectAsState()
-    val weights = weighIns(model)
+    val prs by model.prs.collectAsState()
     val unit = profile?.unit ?: "kg"
     var chosen by model.remembered("stats.period", StatsPeriod.MONTH.label)
     val period = StatsPeriod.entries.firstOrNull { it.label == chosen } ?: StatsPeriod.MONTH
@@ -309,32 +314,26 @@ private fun StatisticsCard(model: AppModel) {
         Figures(
             totalsIn(workouts, range) { volumes.getValue(it) },
             previousRange(period, today)?.let { totalsIn(workouts, it) { w -> volumeOf(w, model::loadOf) } },
-            volumeBuckets(period, today, first, perDay), topExercise(workouts, range),
-            muscleSets(workouts, range.start.atStartOfDay(), model::musclesOf).maxByOrNull { it.value }?.toPair(),
+            volumeBuckets(period, today, first, perDay),
         )
     }
     val monday = weekStart(today).toString()
     val month = today.toString().take(7)
-    val kg = weights.lastOrNull()?.second
-    val height = profile?.heightCm?.takeIf { it > 0 }
-    val last = when (period) { StatsPeriod.WEEK -> "last week"; StatsPeriod.MONTH -> "last month"; else -> "last year" }
     val now = figures.now
     val old = figures.before
-    fun counted(n: Double, o: Double?) = o?.let { "${countChange(n, it)} vs $last" }
-    fun percent(n: Double, o: Double?) = o?.let { "${percentChange(n, it)} vs $last" }
-    Section("Statistics", spacing = Space.m) {
-        RangeChoice(StatsPeriod.entries, period, { it.label }) { chosen = it.label }
-        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            Tile("Workouts", now.workouts.toString(), Modifier.weight(1f), second = counted(now.workouts.toDouble(), old?.workouts?.toDouble()))
-            Tile("Volume", model.volume(now.volume), Modifier.weight(1f), second = percent(now.volume, old?.volume))
+    val against = previousName(period, today)
+    val pbs = remember(workouts, prs, month) { workouts.filter { it.day.startsWith(month) }.sumOf { w -> recordCount(w, prs[w.date].orEmpty()) } }
+    PageSection("Statistics") {
+        Segmented(StatsPeriod.entries, period, { it.label }) { chosen = it.label }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+            StatNumber("Workouts", now.workouts.toString(), Modifier.weight(1f))
+            StatNumber("Volume, $unit", model.volume(now.volume).substringBeforeLast(' '), Modifier.weight(1.3f))
+            StatNumber("Time trained", duration(now.seconds), Modifier.weight(1.2f))
+            StatNumber("Sets", shortNumber(now.sets), Modifier.weight(0.9f))
         }
-        Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
-            Tile("Time trained", duration(now.seconds), Modifier.weight(1f), second = percent(now.seconds.toDouble(), old?.seconds?.toDouble()))
-            Tile("Sets", shortNumber(now.sets), Modifier.weight(1f), second = counted(now.sets, old?.sets))
-        }
-        if (old != null) Text("vs the same days $last", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (old != null && against != null) Text(comparisonSentence(now, old, against), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (now.workouts == 0) {
-            EmptyPreview("No workouts in this period. Log one to fill these in.", "Start workout", { model.stack.clear(); model.tab = Tab.Workout }) { PreviewSamples.Bars(64.dp) }
+            EmptyPreview("No workouts in this period. Log one to fill these in.", "Start workout", { model.stack.clear(); model.openWorkoutSheet() }) { PreviewSamples.Bars(64.dp) }
         } else {
             val buckets = figures.buckets
             if (buckets.isNotEmpty()) {
@@ -350,19 +349,13 @@ private fun StatisticsCard(model: AppModel) {
                     }
                 }
             }
-            Column {
-                figures.muscle?.let { (m, n) -> TopRow("Most trained muscle", "${m.label}, ${setsText(shortNumber(Math.round(n * 10) / 10.0))}", "progress:stat:muscle") { model.open(Screen.MuscleDetail(m)) } }
-                figures.exercise?.let { (e, n) -> TopRow("Top exercise", "$e, ${setsText(shortNumber(n))}", "progress:stat:exercise") { model.open(Screen.ExerciseDetail(e)) } }
-            }
         }
-        // The pages of statistics, the rows touching each other (each 48 dp).
+        // The pages of statistics: hairline-separated rows, each with its headline at the right.
         Column {
-            NavRow("Trends", "${workouts.count { it.day >= monday }} this week", { model.open(Screen.Trends) }, "progress:stat:trends")
-            NavRow("Personal bests", "${shortNumber(recentPrCount(model))} in 30 days", { model.open(Screen.PersonalBests) }, "progress:stat:bests")
-            NavRow("Trophies", plural(consistency?.streak?.length ?: 0, "week") + " streak", { model.open(Screen.Trophies) }, "progress:stat:trophies")
-            NavRow("Calendar", "${workouts.count { it.day.startsWith(month) }} this month", { model.open(Screen.Calendar()) }, "progress:stat:calendar")
-            NavRow("Measurements", kg?.let { "${showWeight(it, unit)} $unit" } ?: NONE, { model.open(Screen.Measurements) }, "progress:stat:measurements")
-            NavRow("BMI", if (kg != null && height != null) shortNumber(Math.round(bmi(kg, height) * 10) / 10.0) else NONE, { model.open(Screen.Bmi) }, "progress:stat:bmi")
+            StatRow("Personal bests", "${shortNumber(pbs)} this month", "progress:stat:bests") { model.open(Screen.PersonalBests) }
+            StatRow("Trends", "${workouts.count { it.day >= monday }} this week", "progress:stat:trends") { model.open(Screen.Trends) }
+            StatRow("Trophies", "${consistency?.streak?.length ?: 0}-week streak", "progress:stat:trophies") { model.open(Screen.Trophies) }
+            StatRow("Calendar", "${workouts.count { it.day.startsWith(month) }} this month", "progress:stat:calendar", last = true) { model.open(Screen.Calendar()) }
         }
     }
 }

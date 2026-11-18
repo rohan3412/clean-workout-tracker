@@ -10,18 +10,9 @@ import android.os.Vibrator
  * The app's own sounds and buzzes. The sounds are played at the media volume, so they follow it and come
  * through headphones; they are Clean's own, made by `tools/bell/make_bell.py`.
  */
-/** A sound a rest can end with, chosen in Settings; [key] is what is stored (kv `rest.tone`), and the first is used until one is picked. */
-enum class RestTone(val key: String, val label: String, val raw: Int) {
-    Deep("deep", "Deep bell", R.raw.bell_deep),
-    Gong("gong", "Gong", R.raw.gong),
-    Soft("soft", "Soft tone", R.raw.tone_soft),
-    Wood("wood", "Wood block", R.raw.wood_block),
-    Bright("bright", "Bright bell", R.raw.bell),
-    ;
-
-    companion object {
-        fun of(key: String?): RestTone = entries.firstOrNull { it.key == key } ?: Deep
-    }
+/** The sound a rest ends with: one tone since 1.1.0 (the old choice, kv `rest.tone`, is ignored); the enum keeps its notification channel's name. */
+enum class RestTone(val key: String, val raw: Int) {
+    Deep("deep", R.raw.bell_deep),
 }
 
 object Feedback {

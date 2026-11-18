@@ -1,6 +1,5 @@
 package clean.app
 
-import clean.app.ui.theme.numbers
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
@@ -206,7 +205,7 @@ private fun Question(title: String, why: String, control: @Composable ColumnScop
 @Composable
 private fun ColumnScope.Reading(text: String, answered: Boolean) {
     Text(
-        text, Modifier.align(Alignment.CenterHorizontally), style = MaterialTheme.typography.displayMedium.numbers(), fontWeight = FontWeight.Bold,
+        text, Modifier.align(Alignment.CenterHorizontally), style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold,
         color = if (answered) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }

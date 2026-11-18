@@ -1,16 +1,14 @@
 package clean.app
 
-import clean.app.ui.theme.toGrey
-import clean.app.ui.theme.onInk
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.runtime.staticCompositionLocalOf
-import clean.app.ui.theme.numbers
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 
@@ -21,11 +19,8 @@ import clean.app.ui.theme.SmallShape
 import clean.app.ui.theme.cardShape
 import clean.app.ui.theme.LocalCleanColors
 import clean.app.ui.theme.LocalLook
-import clean.app.ui.theme.heroOutlineAccent
-import clean.app.ui.theme.tileOutlined
 import clean.app.ui.theme.orange
 import clean.app.ui.theme.LocalTextScale
-import clean.app.ui.theme.presetScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.MutableState
@@ -82,6 +77,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import clean.core.SetItem
 import clean.core.SetType
 import clean.core.shortNumber
@@ -116,21 +112,6 @@ fun stickyBand(name: String, dark: Boolean): Color {
     val named = if (dark) STICKY_COLORS else STICKY_COLORS_LIGHT
     return named[name] ?: parseColor(name) ?: named.values.first()
 }
-
-/** A colour of the user's or the app's own as the look shows it: its grey of the same lightness in Mono, which has no hue. */
-@Composable
-fun Color.inLook(): Color = if (LocalLook.current.mono) toGrey() else this
-
-/** Activity calendar colours, least to most. The first entry is the default. */
-val PALETTES: Map<String, List<Color>> = linkedMapOf(
-    "Ember" to listOf(Color(0xFF5C2A12), Color(0xFF9A4A14), Color(0xFFDD7A1A), Color(0xFFFFC53D)),
-    "Ocean" to listOf(Color(0xFF123A5C), Color(0xFF1B62A0), Color(0xFF2E93E0), Color(0xFF7FD0FF)),
-    "Violet" to listOf(Color(0xFF3A1F5C), Color(0xFF6236A0), Color(0xFF9257E0), Color(0xFFCDA6FF)),
-    "Jet" to listOf(Color(0xFF1F4BFF), Color(0xFF12D6C6), Color(0xFFFFE21A), Color(0xFFFF3A1A)),
-    "Viridis" to listOf(Color(0xFF443A83), Color(0xFF31688E), Color(0xFF35B779), Color(0xFFFDE725)),
-    "Green" to listOf(Color(0xFF1F5C2E), Color(0xFF2A8A40), Color(0xFF34B454), Color(0xFF4CE06F)),
-    "Mono" to listOf(Color(0xFF555555), Color(0xFF858585), Color(0xFFB5B5B5), Color(0xFFEFEFEF)),
-)
 
 private val FULL: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM yyyy, HH:mm")
 private val DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM yyyy")
@@ -185,34 +166,20 @@ fun typeColor(type: SetType): Color = when (type) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackBar(title: String, onBack: () -> Unit, actions: @Composable () -> Unit = {}) {
-    val look = LocalLook.current
-    if (look.sheetPage) RegisterSheetBar()
     TopAppBar(
-        title = { MorphText(title, "title", Modifier.semantics { heading() }, onPage = true, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = if (look.twoToneTitles) FontWeight.SemiBold else null) },
-        navigationIcon = { if (look.sheetPage) HeaderButton(CleanIcons.Back, "Back", onBack) else IconButton(onClick = onBack) { Icon(CleanIcons.Back, "Back") } },
-        actions = { if (look.sheetPage) HeaderActions { actions() } else actions() },
-        // On the page colour in Linen, where the sheet begins under the bar.
-        colors = if (look.sheetPage) TopAppBarDefaults.topAppBarColors(containerColor = look.page, scrolledContainerColor = look.page) else TopAppBarDefaults.topAppBarColors(),
+        title = { MorphText(title, "title", Modifier.semantics { heading() }, onPage = true, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+        navigationIcon = { IconButton(onClick = onBack) { Icon(CleanIcons.Back, "Back") } },
+        actions = { actions() },
     )
 }
 
-/**
- * The big heading at the top of a tab, with that tab's actions above it on the right. Linen sets it in two tones, [text] in the
- * text colour and the optional [second] line under it in the faint grey, with the actions on the same row at the right.
- */
+/** The container of a Scaffold: the theme's background. */
 @Composable
-fun Title(text: String, second: String? = null, actions: @Composable RowScope.() -> Unit = {}) {
-    val look = LocalLook.current
-    if (look.twoToneTitles) {
-        Row(Modifier.fillMaxWidth().padding(start = Space.l, end = Space.s, top = Space.m, bottom = Space.l), verticalAlignment = Alignment.Top) {
-            Column(Modifier.weight(1f).semantics(mergeDescendants = true) { heading() }) {
-                Text(text, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (second != null) Text(second, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold, color = look.faint, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) { actions() }
-        }
-        return
-    }
+fun pageContainer(): Color = MaterialTheme.colorScheme.background
+
+/** The big heading at the top of a tab, with that tab's actions above it on the right. */
+@Composable
+fun Title(text: String, actions: @Composable RowScope.() -> Unit = {}) {
     Column {
         Row(Modifier.fillMaxWidth().height(48.dp).padding(end = Space.xs), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) { actions() }
         Text(text, Modifier.padding(start = Space.l, bottom = Space.m).semantics { heading() }, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
@@ -220,23 +187,38 @@ fun Title(text: String, second: String? = null, actions: @Composable RowScope.()
 }
 
 @Composable
-fun Section(title: String, modifier: Modifier = Modifier, spacing: Dp = Space.s, inner: Dp = Space.l, outer: Dp = Space.s, hero: Boolean = false, onClick: (() -> Unit)? = null, bleed: (@Composable ColumnScope.() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
+fun Section(title: String, modifier: Modifier = Modifier, spacing: Dp = Space.s, inner: Dp = Space.l, outer: Dp = Space.s, hero: Boolean = false, onClick: (() -> Unit)? = null, card: Boolean = hero || onClick != null, bleed: (@Composable ColumnScope.() -> Unit)? = null, hold: (() -> List<HoldAction>)? = null, content: @Composable ColumnScope.() -> Unit) {
     // The air in and around a card follows the text size chosen in Settings.
     val scale = LocalTextScale.current
-    val look = LocalLook.current
+    // D2: a raised card is only for one object that is opened as a whole; everything else is a section on the page, a small grey heading over its content.
+    if (!card) {
+        Column(Modifier.fillMaxWidth().then(modifier)) {
+            val lines = rememberRowLines()
+            Column(Modifier.drawRowLines(lines).padding(horizontal = Space.l, vertical = outer * scale), verticalArrangement = Arrangement.spacedBy(spacing * scale)) {
+                if (title.isNotEmpty()) Text(
+                    title.uppercase(), Modifier.padding(top = Space.xs).semantics { heading(); text = androidx.compose.ui.text.AnnotatedString(title) }, maxLines = 2,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp), color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                androidx.compose.runtime.CompositionLocalProvider(LocalRowLines provides lines) { content() }
+            }
+            bleed?.invoke(this)
+        }
+        return
+    }
     val primary = MaterialTheme.colorScheme.primary
-    // A card is a step above the page as the look says: see-through or solid, with or without an outline and a soft shadow; the hero (Home's Today) is washed with the accent when the look tints it.
+    // A card is a step above the page (a soft shadow in Light); the hero (Home's Today) is washed with the accent in Dark.
     val card = cardFill()
     val shape = cardShape()
-    val tinted = hero && look.heroTint > 0f
-    val fill = if (!tinted) card else if (look.cardAlpha < 1f) primary.copy(alpha = look.heroTint) else lerp(card, primary, look.heroTint)
-    val edge = if (hero && look.heroOutlineAccent()) BorderStroke(look.outlineWidth.dp, primary.copy(alpha = 0.35f)) else cardBorder()
+    val tinted = hero && LocalLook.current.dark
+    val fill = if (!tinted) card else lerp(card, primary, 0.1f)
+    val edge: BorderStroke? = null
     val tap = if (onClick != null) cardTap(onClick) else null
     Card(
         // A card that opens something is pressed as a whole: it dips, and the ripple keeps to its corners.
-        modifier = Modifier.fillMaxWidth().then(if (LocalHalfCard.current) Modifier else Modifier.padding(horizontal = Space.l, vertical = outer * scale)).then(modifier)
-            .then(if (look.shadow) Modifier.shadow(3.dp, shape, clip = false) else Modifier)
-            .then(if (tap != null) Modifier.clip(shape).pressable(onClick = tap) else Modifier),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = Space.l, vertical = outer * scale).then(modifier)
+            .cardDepth(shape)
+            .then(if (tap != null) Modifier.clip(shape).pressable(onClick = tap) else Modifier)
+            .holdMenu(shape, hold, fill),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = fill),
         border = edge,
@@ -260,57 +242,29 @@ fun SectionTitle(text: String, modifier: Modifier = Modifier, textAlign: TextAli
     MorphText(androidx.compose.ui.text.AnnotatedString(text), role, modifier.semantics { heading() }, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, textAlign = textAlign)
 }
 
-/** A card's fill as the look has it: solid, see-through or transparent. [Section] and the tiles share it. */
+/** A card's fill: solid, one step above the page. [Section] and the tiles share it. */
 @Composable
-fun cardFill(): Color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = LocalLook.current.cardAlpha)
-
-/** A stat tile's fill: the card's, or Linen's soft grey step under the white sheet (which then has no hairline, see [tileBorder]). */
-@Composable
-fun tileFill(): Color = LocalLook.current.let { if (it.tile == it.raised) cardFill() else it.tile }
-
-/** A stat tile's outline: the card's, except Linen's hairline, which a tile in its own grey goes without. */
-@Composable
-fun tileBorder(): BorderStroke? = if (LocalLook.current.tileOutlined()) cardBorder() else null
-
-/** A card's outline as the look has it, or none. */
-@Composable
-fun cardBorder(): BorderStroke? {
-    val look = LocalLook.current
-    return if (look.outlineWidth > 0f) BorderStroke(look.outlineWidth.dp, look.outline ?: MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)) else null
-}
-
-/** Whether the card being drawn is one of Home's half-width cards: the layout then places it, so it adds no margin of its own. */
-val LocalHalfCard = staticCompositionLocalOf { false }
-
-/** Whether charts in Home's cards run to the card's edges (Settings, Appearance, Home) rather than keep the card's padding. */
-val LocalEdgeCharts = staticCompositionLocalOf { false }
+fun cardFill(): Color = MaterialTheme.colorScheme.surfaceContainer
 
 @Composable
 fun LabelValue(label: String, value: String, spoken: String? = null, onClick: (() -> Unit)? = null) {
+    val lines = LocalRowLines.current
     Row(
-        Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+        Modifier.fillMaxWidth().then(if (lines != null) Modifier.rowLine(lines) else Modifier).then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(if (lines != null) Modifier.padding(vertical = 6.dp) else Modifier)
             .then(if (spoken != null) Modifier.semantics(mergeDescendants = true) { contentDescription = spoken } else Modifier),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = LocalTextStyle.current.numbers())
+        Text(value, style = LocalTextStyle.current)
     }
 }
 
-/**
- * A filter chip. In Linen it is fully round, outlined by a hairline, and orange with white words when selected; elsewhere it is
- * Material's own.
- */
+/** A filter chip. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CleanChip(selected: Boolean, onClick: () -> Unit, label: @Composable () -> Unit, modifier: Modifier = Modifier) {
-    val look = LocalLook.current
-    if (!look.sheetPage) { FilterChip(selected = selected, onClick = onClick, label = label, modifier = modifier); return }
-    FilterChip(
-        selected = selected, onClick = onClick, label = label, modifier = modifier, shape = CircleShape,
-        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = look.orange, selectedLabelColor = Color.White),
-        border = FilterChipDefaults.filterChipBorder(enabled = true, selected = selected, borderColor = look.divider ?: look.muted, selectedBorderColor = Color.Transparent),
-    )
+    FilterChip(selected = selected, onClick = onClick, label = label, modifier = modifier)
 }
 
 /** Mutually exclusive choices, wrapping onto more lines when they do not fit. */
@@ -334,28 +288,9 @@ fun <T> MorphChoice(options: List<T>, selected: T, label: (T) -> String, morph: 
     }
 }
 
-/**
- * Choices of a range or a period (1M / 3M / 1Y / All, Week / Month / Year / All): the chips everywhere but Linen, where the selected
- * one is a black pill with white words and the others plain quiet words, no outlines.
- */
-@OptIn(ExperimentalLayoutApi::class)
+/** Choices of a range or a period (1M / 3M / 1Y / All, Week / Month / Year / All): a segmented control, since it switches what the page shows. */
 @Composable
-fun <T> RangeChoice(options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit) {
-    val look = LocalLook.current
-    if (!look.sheetPage) { Choice(options, selected, label, onSelect); return }
-    Row(horizontalArrangement = Arrangement.spacedBy(Space.xxs), verticalAlignment = Alignment.CenterVertically) {
-        for (option in options) {
-            val on = option == selected
-            Box(
-                Modifier.minTouch().clip(CircleShape).background(if (on) look.text else Color.Transparent)
-                    .selectable(on, role = Role.RadioButton) { onSelect(option) }.padding(horizontal = Space.l),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(label(option), color = if (on) look.onInk else look.muted, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, style = MaterialTheme.typography.labelLarge)
-            }
-        }
-    }
-}
+fun <T> RangeChoice(options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit) = Segmented(options, selected, label, onSelect = onSelect)
 
 /** The phone's own date picker and then its time picker; [onPick] gets the choice, with [initial]'s seconds. Not in the future. */
 fun pickDateTime(context: android.content.Context, initial: LocalDateTime, onPick: (LocalDateTime) -> Unit) {
@@ -477,10 +412,6 @@ fun AppModel.measurementDays(): Long {
 fun parseColor(text: String?): Color? = text?.takeIf { it.startsWith("#") }?.drop(1)?.toLongOrNull(16)?.let { Color(it) }
 
 fun Color.hex(): String = "#%08X".format(toArgb())
-
-/** The calendar colours for a stored choice: a named map, or a ramp from dark up to a colour of the user's own. */
-fun paletteOf(name: String): List<Color> =
-    PALETTES[name] ?: presetScale(name) ?: parseColor(name)?.let { c -> listOf(0.45f, 0.63f, 0.82f, 1f).map { lerp(Color.Black, c, it) } } ?: PALETTES.values.first()
 
 private val HUES = (0..360 step 30).map { Color.hsv(it.toFloat(), 1f, 1f) }
 

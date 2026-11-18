@@ -111,3 +111,34 @@ fun topExercise(workouts: List<Workout>, range: DayRange): Pair<String, Double>?
     }
     return sets.entries.sortedWith(compareByDescending<Map.Entry<String, Double>> { it.value }.thenBy { it.key }).firstOrNull()?.let { it.key to it.value }
 }
+
+/** What the period before is called in a sentence: "last week", the month's name, "last year". All has none. */
+fun previousName(period: StatsPeriod, today: LocalDate): String? {
+    val before = previousRange(period, today) ?: return null
+    return when (period) {
+        StatsPeriod.WEEK -> "last week"
+        StatsPeriod.MONTH -> before.start.month.getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.ENGLISH)
+        else -> "last year"
+    }
+}
+
+/**
+ * One grey sentence setting a period against the same elapsed part of the one before: "1 fewer workout than October, volume down 8 %".
+ * The volume part is left out when the earlier period lifted nothing; a rise from nothing in workouts reads as a plain count.
+ */
+fun comparisonSentence(now: PeriodTotals, before: PeriodTotals, name: String): String {
+    val diff = now.workouts - before.workouts
+    val count = when {
+        diff > 0 -> "$diff more workout${if (diff == 1) "" else "s"} than $name"
+        diff < 0 -> "${-diff} fewer workout${if (diff == -1) "" else "s"} than $name"
+        else -> "Same number of workouts as $name"
+    }
+    if (before.volume <= 0.0) return count
+    val percent = Math.round((now.volume - before.volume) / before.volume * 100)
+    val volume = when {
+        percent > 0 -> "volume up $percent %"
+        percent < 0 -> "volume down ${-percent} %"
+        else -> "volume the same"
+    }
+    return "$count, $volume"
+}

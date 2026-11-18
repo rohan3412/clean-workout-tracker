@@ -19,7 +19,6 @@ import android.widget.RemoteViews
 import clean.app.data.CleanDao
 import clean.app.data.CleanDb
 import clean.core.restEndFeedback
-import clean.core.restNotifCompact
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -32,14 +31,13 @@ object RestAlert {
     private const val END = "clean.app.REST_END"
     internal const val ADD = "clean.app.REST_ADD"
     internal const val SKIP = "clean.app.REST_SKIP"
-    internal const val TOGGLE = "clean.app.REST_TOGGLE"
     /** Seconds the notification's "+15 s" adds. */
     internal const val MORE = 15
     /** The running app's own way of changing its rest (true adds [MORE] seconds, false skips); null when the app is not alive. */
     var onAction: ((Boolean) -> Unit)? = null
     private const val RUNNING_ID = 7001
     private const val OVER_ID = 7002
-    /** A channel's sound cannot be changed once it is made, so each sound has a channel of its own; the first one, from before there was a choice, is taken away. */
+    /** A channel's sound cannot be changed once it is made, so the sound has a channel named by its tone; the first one, from before there was a choice, is taken away. Channels of the tones dropped in 1.1.0 are taken away too. */
     private const val OLD_BELL_CHANNEL = "rest_over"
     private fun bellChannel(tone: RestTone) = "rest_over_${tone.key}"
     private const val QUIET_CHANNEL = "rest_running"
@@ -50,8 +48,9 @@ object RestAlert {
     private fun channels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.deleteNotificationChannel(OLD_BELL_CHANNEL)
+        for (old in listOf("gong", "soft", "wood", "bright")) manager.deleteNotificationChannel("rest_over_$old")
         for (tone in RestTone.entries) manager.createNotificationChannel(
-            NotificationChannel(bellChannel(tone), "Rest over: ${tone.label}", NotificationManager.IMPORTANCE_HIGH).apply {
+            NotificationChannel(bellChannel(tone), "Rest over", NotificationManager.IMPORTANCE_HIGH).apply {
                 setSound(Uri.parse("android.resource://${context.packageName}/${tone.raw}"), AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
                 enableVibration(false)
             },
@@ -85,54 +84,42 @@ object RestAlert {
      * with "+15 s" and "Skip" on it so the rest can be changed from the lock screen. [key] is the kv key the rest is kept under,
      * [total] the rest's length in seconds and [next] the next set in words; the buttons carry them for when the app is gone.
      */
-    fun schedule(context: Context, end: Long, key: String? = null, total: Int = 0, next: String? = null, compact: Boolean = false) {
+    fun schedule(context: Context, end: Long, key: String? = null, total: Int = 0, next: String? = null) {
         val alarms = context.getSystemService(AlarmManager::class.java)
         set(alarms, maxOf(System.currentTimeMillis(), end - 5000), alarmFor(context, COUNTDOWN, end, PendingIntent.FLAG_UPDATE_CURRENT))
         set(alarms, end, alarmFor(context, END, end, PendingIntent.FLAG_UPDATE_CURRENT))
-        post(context, end, key, total, next, compact)
+        post(context, end, key, total, next)
     }
 
     /**
      * The notification alone: silent and ongoing, public on the lock screen (it holds only the countdown and the next set). Its own
-     * layout is the larger form (countdown, how far the rest has gone, the next set, a chevron at the bottom right) or the smaller one
-     * (countdown, chevron at the top right). The bar is set when this is posted and when the rest changes, never every second.
+     * layout is the larger form (countdown, how far the rest has gone, the next set), the one form since 1.1.0; the collapsed view is one line.
+     * The bar is set when this is posted and when the rest changes, never every second.
      */
-    private fun post(context: Context, end: Long, key: String?, total: Int, next: String?, compact: Boolean) {
+    private fun post(context: Context, end: Long, key: String?, total: Int, next: String?) {
         val manager = context.getSystemService(NotificationManager::class.java)
         if (!manager.areNotificationsEnabled()) return
         channels(context)
         val left = (end - System.currentTimeMillis()).coerceAtLeast(0)
-        val toggle = Intent(context, RestAlertReceiver::class.java).setAction(TOGGLE).putExtra("end", end).putExtra("key", key).putExtra("total", total).putExtra("next", next)
-        val flip = PendingIntent.getBroadcast(context, TOGGLE.hashCode(), toggle, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        // The collapsed view is always the one-line form, since the shade shows a silent notification collapsed and the larger
-        // layout does not fit there. In the larger form the system's own arrow opens it, so the one-line chevron is hidden.
+        // The collapsed view is the one-line form, since the shade shows a silent notification collapsed and the larger
+        // layout does not fit there; the system's own arrow opens the larger one.
         val small = RemoteViews(context.packageName, R.layout.notif_rest_compact)
         small.setChronometer(R.id.notif_clock, SystemClock.elapsedRealtime() + left, null, true)
         small.setChronometerCountDown(R.id.notif_clock, true)
-        small.setViewVisibility(R.id.notif_toggle, if (compact) android.view.View.VISIBLE else android.view.View.GONE)
-        small.setContentDescription(R.id.notif_toggle, "Show more")
-        small.setOnClickPendingIntent(R.id.notif_toggle, flip)
-        val large = if (compact) null else RemoteViews(context.packageName, R.layout.notif_rest_expanded).apply {
+        val large = RemoteViews(context.packageName, R.layout.notif_rest_expanded).apply {
             setChronometer(R.id.notif_clock, SystemClock.elapsedRealtime() + left, null, true)
             setChronometerCountDown(R.id.notif_clock, true)
             val done = if (total > 0) (1000 - left / total).toInt().coerceIn(0, 1000) else 0
             setProgressBar(R.id.notif_progress, 1000, done, false)
             setTextViewText(R.id.notif_next, next ?: "")
             setViewVisibility(R.id.notif_next, if (next == null) android.view.View.INVISIBLE else android.view.View.VISIBLE)
-            setContentDescription(R.id.notif_toggle, "Show less")
-            setOnClickPendingIntent(R.id.notif_toggle, flip)
         }
         manager.notify(
             RUNNING_ID,
-            builder(context, QUIET_CHANNEL).setContentTitle("Rest").setContentText(next).setCustomContentView(small).apply { if (large != null) setCustomBigContentView(large) }.setStyle(Notification.DecoratedCustomViewStyle())
+            builder(context, QUIET_CHANNEL).setContentTitle("Rest").setContentText(next).setCustomContentView(small).setCustomBigContentView(large).setStyle(Notification.DecoratedCustomViewStyle())
                 .setVisibility(Notification.VISIBILITY_PUBLIC).setOngoing(true).setOnlyAlertOnce(true).setShowWhen(false)
                 .addAction(button(context, "+$MORE s", ADD, end, key, total, next)).addAction(button(context, "Skip", SKIP, end, key, total, next)).build(),
         )
-    }
-
-    /** Draws the notification again in the other form: the chevron was pressed. */
-    internal fun repost(context: Context, end: Long, key: String?, total: Int, next: String?, compact: Boolean) {
-        if (end > System.currentTimeMillis()) post(context, end, key, total, next, compact)
     }
 
     /** Takes back the alarms and both notifications: the app is in front again, or the rest is over or skipped. */
@@ -203,20 +190,14 @@ class RestAlertReceiver : BroadcastReceiver() {
                 RestAlert.cancel(context)
                 if (add && end > System.currentTimeMillis()) {
                     val shown = intent.getIntExtra("total", 0) + RestAlert.MORE
-                    RestAlert.schedule(context, end, key, shown, intent.getStringExtra("next"), restNotifCompact(dao.get("rest.notif")))
+                    RestAlert.schedule(context, end, key, shown, intent.getStringExtra("next"))
                 }
                 if (key != null) {
                     val total = dao.get(key)?.substringAfter('|', "")?.toIntOrNull() ?: 0
                     if (add) dao.put(clean.app.data.Kv(key, "$end|${total + RestAlert.MORE}")) else dao.remove(key)
                 }
             }
-            // The chevron: the other form of the notification, kept for the next rest too.
-            RestAlert.TOGGLE -> {
-                val compact = !restNotifCompact(dao.get("rest.notif"))
-                dao.put(clean.app.data.Kv("rest.notif", if (compact) "compact" else "expanded"))
-                RestAlert.repost(context, intent.getLongExtra("end", 0), intent.getStringExtra("key"), intent.getIntExtra("total", 0), intent.getStringExtra("next"), compact)
-            }
-            "clean.app.REST_END" -> RestAlert.over(context, if (restEndOf(dao).sound) RestTone.of(dao.get("rest.tone")) else null)
+            "clean.app.REST_END" -> RestAlert.over(context, if (restEndOf(dao).sound) RestTone.Deep else null)
         }
     }
 

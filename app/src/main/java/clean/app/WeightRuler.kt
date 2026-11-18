@@ -1,6 +1,5 @@
 package clean.app
 
-import clean.app.ui.theme.numbers
 import android.os.SystemClock
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.exponentialDecay
@@ -41,7 +40,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -105,14 +103,14 @@ fun WeightSheet(model: AppModel, title: String = "Log body weight", onPick: ((Do
                     text, { text = it }, singleLine = true, suffix = { Text(unit) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { commit() }),
                     modifier = Modifier.width(220.dp).focusRequester(focus),
-                    textStyle = MaterialTheme.typography.headlineMedium.numbers().copy(fontWeight = FontWeight.Bold),
+                    textStyle = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
                 )
             } else {
                 Row(
                     Modifier.clickable(onClickLabel = "Type the weight") { text = clean.core.shortNumber(value); typing = true }.minTouch().semantics(mergeDescendants = true) { contentDescription = "Body weight ${weightText(value)} ${unitWord(unit)}" },
                     horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.Bottom,
                 ) {
-                    Text(weightText(value), style = MaterialTheme.typography.displayMedium.numbers(), fontWeight = FontWeight.Bold)
+                    Text(weightText(value), style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold)
                     Text(unit, Modifier.padding(bottom = Space.s), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -175,9 +173,8 @@ internal fun Ruler(value: Double, onChange: (Double) -> Unit, spec: RulerSpec) {
     // A number typed, or a step from a screen reader, moves the ruler to it.
     LaunchedEffect(value) { if (!moving && abs(pos.value - clamp(value * perUnit)) > 0.5f) pos.snapTo(clamp(value * perUnit)) }
     // While the finger or the fling moves it, the value follows, with the lightest tick of the phone for each whole unit (a kilo, a pound, a centimetre) passed;
-    // the tick setting (kv `feedback.tick`) can turn it off.
+    // there is none with Animations off.
     val haptic = LocalHapticFeedback.current
-    val tickLevel by rememberUpdatedState(viewModel<AppModel>().options.collectAsState().value["feedback.tick"] ?: "light")
     LaunchedEffect(Unit) {
         var lastTick = 0L
         var lastWhole = Math.floorDiv(pos.value.roundToInt(), spec.perUnit)
@@ -188,7 +185,7 @@ internal fun Ruler(value: Double, onChange: (Double) -> Unit, spec: RulerSpec) {
             val now = SystemClock.uptimeMillis()
             if (whole != lastWhole) {
                 lastWhole = whole
-                if (motion && tickLevel != "off" && now - lastTick > 30) { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); lastTick = now }
+                if (motion && now - lastTick > 30) { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove); lastTick = now }
             }
         }
     }

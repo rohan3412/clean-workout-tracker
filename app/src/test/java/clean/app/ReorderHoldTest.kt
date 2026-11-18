@@ -73,6 +73,7 @@ class ReorderHoldTest {
             val id = repo.createProfile("Test")
             repo.dao.put(Kv("active", id.toString()))
             repo.dao.put(Kv("welcome:$id", "done"))
+            repo.dao.put(Kv("glass.reduce", "on")) // Haze cannot blur in Robolectric: solid glass
         }
         val scenario = ActivityScenario.launch(MainActivity::class.java)
         lateinit var model: AppModel

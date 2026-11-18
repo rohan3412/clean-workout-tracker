@@ -23,7 +23,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.Density
 import clean.app.ui.theme.LocalLook
-import clean.app.ui.theme.numbers
 import clean.core.exportFit
 import clean.core.exportText
 import clean.core.muscleSets
@@ -99,10 +98,9 @@ private fun ShareCard(model: AppModel, workout: Workout, prs: Double) {
     val palette = LocalLook.current.scale
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     val shown = workout.blocks.filter { it.workingCount > 0.0 }
-    val border = cardBorder()
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(Space.m)) {
         Column(
-            Modifier.fillMaxSize().background(cardFill(), cardShape()).then(if (border != null) Modifier.border(border, cardShape()) else Modifier).padding(Space.xl),
+            Modifier.fillMaxSize().background(cardFill(), cardShape()).padding(Space.xl),
             verticalArrangement = Arrangement.spacedBy(Space.s),
         ) {
             Column {
@@ -116,7 +114,7 @@ private fun ShareCard(model: AppModel, workout: Workout, prs: Double) {
             Row(Modifier.fillMaxWidth()) {
                 for ((label, value) in listOf("Time" to duration(workout.durationSeconds), "Volume" to model.volume(volume), "Sets" to shortNumber(workout.workingCount), "PRs" to shortNumber(prs))) {
                     Column(Modifier.weight(1f)) {
-                        Text(value, style = MaterialTheme.typography.titleMedium.numbers(), fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         Text(label, style = MaterialTheme.typography.labelSmall, color = muted)
                     }
                 }
@@ -130,8 +128,8 @@ private fun ShareCard(model: AppModel, workout: Workout, prs: Double) {
                         val best = if (block.paired) bestRound(block.rounds)?.let { roundLine(it) { set -> setValues(set, unit) } }
                         else block.bestSet?.let { setValues(it, unit) }
                         Column {
-                            Text("${shortNumber(block.workingCount)} × ${block.exercise}", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(best.orEmpty(), style = MaterialTheme.typography.labelSmall.numbers(), color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${shortNumber(block.workingCount)} × ${block.exercise}", style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(best.orEmpty(), style = MaterialTheme.typography.labelSmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                     if (shown.size > EXERCISE_LINES) Text("+${shown.size - EXERCISE_LINES} more", style = MaterialTheme.typography.labelSmall, color = muted)

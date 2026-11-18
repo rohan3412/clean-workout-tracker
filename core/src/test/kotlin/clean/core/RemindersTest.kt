@@ -31,4 +31,12 @@ class RemindersTest {
         // Only Monday: the one after a Monday evening is a week on.
         assertEquals(LocalDateTime.of(2026, 10, 26, 7, 30), nextReminder(LocalDateTime.of(2026, 10, 19, 8, 0), setOf(MONDAY), 7 * 60 + 30))
     }
+
+    @Test
+    fun clockTimes() {
+        kotlin.test.assertEquals(6 * 60 + 30, parseClock("06:30"))
+        kotlin.test.assertEquals("18:05", clockText(18 * 60 + 5))
+        kotlin.test.assertNull(parseClock("25:00"))
+        kotlin.test.assertNull(parseClock("6"))
+    }
 }

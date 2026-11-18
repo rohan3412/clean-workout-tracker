@@ -37,15 +37,14 @@ fun parseRestPresets(text: String?): List<Int> {
     return parts.filterNotNull()
 }
 
-/** Seconds the full-screen rest stays up before shrinking to a pill (kv `rest.hideAfter`); the offered choices first. */
-val REST_HIDE_CHOICES = listOf(3, 5, 10, 15)
+/** Seconds the full-screen rest stays up before shrinking to a pill. */
 const val DEFAULT_REST_HIDE = 5
 
 /** The last seconds of a rest, in which the full screen comes back by itself. */
 const val REST_RETURN_SECONDS = 10
 
 /**
- * Whether "Full screen then hide" shows the big panel: for the first [hideAfter] seconds of the rest ([elapsed]), for the last
+ * Whether the rest panel shows its full form (the one rest style since 1.1.0) the big panel: for the first [hideAfter] seconds of the rest ([elapsed]), for the last
  * [REST_RETURN_SECONDS] ([left]), and whenever the pill was tapped ([reopened]).
  */
 fun restShowsFull(elapsed: Long, left: Long, hideAfter: Int, reopened: Boolean): Boolean =

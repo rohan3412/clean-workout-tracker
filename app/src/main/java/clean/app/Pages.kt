@@ -289,7 +289,7 @@ fun CalendarScreen(model: AppModel, selected: String?) {
     val workouts by model.workouts.collectAsState()
     val palette = LocalLook.current.scale
     var mode by model.remembered("calendarMode", "Time")
-    val weekTotals = model.flag("calendar.weeks")
+    val weekTotals = true
     // What a day is shaded by.
     val seconds: Map<LocalDate, Double> = remember(workouts, mode) {
         when (mode) {
@@ -299,8 +299,6 @@ fun CalendarScreen(model: AppModel, selected: String?) {
         }
     }
     val byDay = remember(workouts) { workouts.groupBy { it.day } }
-    val templateColors by model.templateColors.collectAsState()
-    val dots = remember(workouts, templateColors) { dayTemplateColors(workouts, templateColors) }
     // The day a past workout is being added to.
     var logging by remember { mutableStateOf<LocalDate?>(null) }
     // Shaded between a short day and a long one (the 5th and 95th percentiles), so ordinary days spread over the whole scale.
@@ -352,8 +350,8 @@ fun CalendarScreen(model: AppModel, selected: String?) {
     Scaffold(containerColor = pageContainer(), topBar = { BackBar("Calendar", model::back) }) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().padding(horizontal = Space.l)) {
             // The scale stays put while the months scroll.
-            Row(Modifier.fillMaxWidth().padding(bottom = Space.s), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { Choice(listOf("Time", "Volume", "Sets"), mode, { it }) { mode = it } }
+            Row(Modifier.fillMaxWidth().padding(vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
+                Segmented(listOf("Time", "Volume", "Sets"), mode, { it }, Modifier.weight(1f).padding(end = Space.m)) { mode = it }
                 Text("Less ", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Box(Modifier.size(width = 84.dp, height = 12.dp).background(Brush.horizontalGradient(palette), RoundedCornerShape(3.dp)))
                 Text(" More", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -363,8 +361,8 @@ fun CalendarScreen(model: AppModel, selected: String?) {
                 items(months, key = { it.toString() }) { month ->
                     val count = perMonth[month.toString()] ?: 0
                     Row(Modifier.fillMaxWidth().clickable { model.open(Screen.Month(month.toString())) }.padding(top = Space.l, bottom = Space.s), horizontalArrangement = Arrangement.SpaceBetween) {
-                        SectionTitle(month.format(MONTH_TITLE))
-                        Text(plural(count, "workout"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Caption(month.format(MONTH_TITLE))
+                        Text(plural(count, "workout"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Row {
                         for (d in "MTWTFSS") Text(d.toString(), Modifier.weight(1f), textAlign = TextAlign.Center, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -393,9 +391,8 @@ fun CalendarScreen(model: AppModel, selected: String?) {
                                         fontWeight = if (day == today) FontWeight.Bold else FontWeight.Normal,
                                         color = if (value <= 0) MaterialTheme.colorScheme.onSurfaceVariant else color.readableOn(),
                                     )
-                                    dots[day]?.let { TemplateDot(it, Modifier.align(Alignment.BottomCenter).padding(bottom = Space.xs), size = 6.dp) }
                                     // What was done that day; there can be more than one workout.
-                                    if (open == day) DropdownMenu(true, { open = null }) {
+                                    if (open == day) CleanMenu(true, { open = null }) {
                                         Text(prettyDay(day), Modifier.padding(horizontal = Space.m, vertical = Space.xs), fontWeight = FontWeight.Bold)
                                         val done = byDay[day.toString()].orEmpty()
                                         if (done.isEmpty()) Text("No workout", Modifier.padding(horizontal = Space.m, vertical = Space.s), color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -579,8 +576,8 @@ fun NoteReviewScreen(model: AppModel, exercise: String?) {
         )
     }
     Scaffold(containerColor = pageContainer(), topBar = { BackBar("Notes to variations", model::back) }) { padding ->
-        SettingsFloat(model, Modifier.padding(padding).fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = settingsFloatSpace(model))) {
+        androidx.compose.foundation.layout.Box(Modifier.padding(padding).fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize()) {
             item {
                 Section("") {
                     Text(
@@ -831,7 +828,7 @@ private fun CelebrationBlock(model: AppModel, earned: Earned) {
             Row(horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
                 if (earned.targetHit) ProgressRing(1f, Modifier.size(72.dp), from = 0f) { Icon(CleanIcons.Star, null, Modifier.size(32.dp).then(scaled), tint = accent) }
                 if (earned.awards.isNotEmpty()) Icon(CleanIcons.Star, null, Modifier.size(40.dp).then(scaled), tint = accent)
-                if (earned.shield) Icon(CleanIcons.Shield, null, Modifier.size(40.dp).then(scaled), tint = accent)
+                if (earned.shield) Icon(CleanIcons.ShieldLine, null, Modifier.size(40.dp).then(scaled), tint = accent)
             }
             Column(verticalArrangement = Arrangement.spacedBy(Space.xs)) {
                 if (earned.targetHit) Text("Target hit: ${earned.count} of ${earned.target} this week", fontWeight = FontWeight.Bold)

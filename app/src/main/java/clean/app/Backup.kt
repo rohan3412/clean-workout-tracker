@@ -31,14 +31,14 @@ object Backup {
     private const val FORMAT = "clean-backup"
     private const val VERSION = 1
 
-    /** The folders of `filesDir` a backup carries; the imported font is a file named `font-…` beside them. */
+    /** The folders of `filesDir` a backup carries (an imported font, a `font-…` file, was carried until 1.1.0 and is ignored now). */
     private val FOLDERS = listOf("animations", "photos", "places")
 
     /** Raised with a sentence fit to show the user. */
     class Refused(message: String) : Exception(message)
     class Manifest(val db: Int, val created: String, val app: String)
     class Contents(val profiles: List<String>, val workouts: Int, val first: String?, val last: String?, val weighIns: Int, val templates: Int)
-    class Inspected(val manifest: Manifest, val contents: Contents, val animations: Boolean, val font: Boolean)
+    class Inspected(val manifest: Manifest, val contents: Contents, val animations: Boolean)
 
     fun manifestJson(db: Int, created: String, app: String): String =
         JSONObject().put("format", FORMAT).put("version", VERSION).put("db", db).put("created", created).put("app", app).toString()
@@ -58,9 +58,8 @@ object Backup {
     /** The files a backup carries, by the name they have inside the zip. */
     private fun carried(context: Context, withAnimations: Boolean): List<Pair<String, File>> {
         val root = context.filesDir
-        val fonts = root.listFiles { f -> f.isFile && f.name.startsWith("font-") }.orEmpty().toList()
         val inFolders = FOLDERS.filter { withAnimations || it != "animations" }.flatMap { File(root, it).walkTopDown().filter { f -> f.isFile }.toList() }
-        return (fonts + inFolders).map { FILES + it.relativeTo(root).invariantSeparatorsPath to it }
+        return inFolders.map { FILES + it.relativeTo(root).invariantSeparatorsPath to it }
     }
 
     /** The size of the imported animations, which are most of a big backup. */
@@ -152,7 +151,7 @@ object Backup {
             extract(zip, entry, temp)
             val contents = read(temp)
             val names = zip.entries().asSequence().map { it.name }.toList()
-            Inspected(manifest, contents, names.any { it.startsWith(FILES + "animations/") && !it.endsWith("/") }, names.any { it.startsWith(FILES + "font-") })
+            Inspected(manifest, contents, names.any { it.startsWith(FILES + "animations/") && !it.endsWith("/") })
         } finally {
             deleteDb(temp)
         }
@@ -163,7 +162,7 @@ object Backup {
     /**
      * Replaces the phone's database and files with the backup's. It is all extracted into the cache and checked first, so a
      * zip that fails halfway leaves the phone as it was. The database is closed here; the app has to be [restart]ed afterwards.
-     * Only the database and the files Clean keeps (the font, animations, photos, places) are taken, and only from inside
+     * Only the database and the files Clean keeps (animations, photos, places) are taken, and only from inside
      * `files/`: any other entry, or a path that climbs out, is ignored. A backup without animations leaves the phone's alone.
      */
     fun apply(context: Context, file: File) {
@@ -181,14 +180,15 @@ object Backup {
                     val target = File(stagedFiles, entry.name.removePrefix(FILES)).canonicalFile
                     if (!target.path.startsWith(stagedFiles.path + File.separator)) continue
                     val parts = target.relativeTo(stagedFiles).invariantSeparatorsPath.split('/')
-                    if ((parts.size == 1 && parts[0].startsWith("font-")) || (parts.size > 1 && parts[0] in FOLDERS)) extract(zip, entry, target)
+                    // A `font-*` file in an older backup is ignored: the font is Inter everywhere since 1.1.0.
+                    if (parts.size > 1 && parts[0] in FOLDERS) extract(zip, entry, target)
                 }
             }
             CleanDb.close()
             val live = context.getDatabasePath(DB)
             deleteDb(live)
             move(stagedDb, live)
-            // The font and the photos and places belong to the database being put back, so the phone's own go either way.
+            // The photos and places belong to the database being put back, so the phone's own go either way (and a font file left by an older version goes).
             val root = context.filesDir
             root.listFiles { f -> f.name.startsWith("font-") }?.forEach { it.delete() }
             for (name in FOLDERS) if (name != "animations" || File(stagedFiles, name).exists()) File(root, name).deleteRecursively()
@@ -198,7 +198,7 @@ object Backup {
         }
     }
 
-    /** Takes everything the app keeps off the phone: the database, the font, animations, photos, places and the cache. Then [restart]. */
+    /** Takes everything the app keeps off the phone: the database, animations, photos, places and the cache. Then [restart]. */
     fun wipe(context: Context) {
         CleanDb.close()
         deleteDb(context.getDatabasePath(DB))
