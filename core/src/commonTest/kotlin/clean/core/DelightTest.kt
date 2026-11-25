@@ -45,7 +45,7 @@ class DelightTest {
     }
 
     @Test
-    fun `the anniversary of the first workout is its month and day, a year on or more`() {
+    fun `the anniversary of the first workout is its month and day a year on or more`() {
         assertEquals(1, anniversaryYears(d("2025-11-20"), d("2026-11-20")))
         assertEquals(3, anniversaryYears(d("2023-03-05"), d("2026-03-05")))
         assertNull(anniversaryYears(d("2025-11-20"), d("2026-11-19")))

@@ -130,7 +130,7 @@ class StatsPeriodTest {
     }
 
     @Test
-    fun `a day that only ties or trails the best day of the log is not a high, and neither is a log with nothing else`() {
+    fun `a day that only ties or trails the best day of the log is not a high and neither is a log with nothing else`() {
         val today = day("2026-11-20")
         val tie = mapOf(day("2026-11-18") to 9000.0, day("2026-03-02") to 9000.0)
         assertEquals(null, allTimeHigh(volumeBuckets(StatsPeriod.WEEK, today, day("2026-03-02"), tie), tie))
@@ -142,7 +142,7 @@ class StatsPeriodTest {
     }
 
     @Test
-    fun `a month bar is compared with every other month of the log, and a year bar with every other year`() {
+    fun `a month bar is compared with every other month of the log and a year bar with every other year`() {
         val today = day("2026-11-20")
         // November is split over days but its month total beats September 2025's; the single biggest day of September is bigger than any day of November.
         val perDay = mapOf(day("2026-11-03") to 5000.0, day("2026-11-10") to 5000.0, day("2025-09-05") to 7000.0)
