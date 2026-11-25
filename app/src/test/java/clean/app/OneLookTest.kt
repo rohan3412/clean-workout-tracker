@@ -1,14 +1,16 @@
 package clean.app
 
+import org.junit.experimental.categories.Category
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import java.io.File
 
 /** Guards that keep the screens on the shared pieces of one look instead of styles typed in place. */
+@Category(Regression::class)
 class OneLookTest {
     /** The screens' sources: the app's files outside `ui/theme`, where the look's own values live. */
     private val sources: Map<String, String> =
-        listOf(File("src/main/java/clean/app"), File("app/src/main/java/clean/app")).first { it.exists() }
+        listOf(File("../shared/src/commonMain/kotlin/clean/app"), File("shared/src/commonMain/kotlin/clean/app")).first { it.exists() }
             .listFiles()!!.filter { it.extension == "kt" }.associate { it.name to it.readText() }
 
     private fun count(text: String, needle: String) = text.split(needle).size - 1
@@ -22,6 +24,8 @@ class OneLookTest {
             "Workouts.kt" to 2,   // a workout card's name, as the card's title and as the row the History card's row travels from
             "Share.kt" to 1,      // a figure on the share picture
             "Photos.kt" to 2,     // captions over a full-screen photo and a comparison
+            "WhatsNew.kt" to 1,   // a highlight's headline on the What's new page
+            "Templates.kt" to 1,  // the name of a start tile on the Workout sheet (Empty workout, Pick exercises), a card title and no section
         )
         val found = sources.mapValues { count(it.value, "typography.titleMedium, fontWeight = FontWeight.Bold") }.filterValues { it > 0 }
         assertEquals(allowed, found)

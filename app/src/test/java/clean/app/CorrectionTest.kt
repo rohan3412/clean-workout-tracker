@@ -1,10 +1,14 @@
 package clean.app
 
+import org.junit.experimental.categories.Category
+import clean.app.android.*
+
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import clean.app.data.CleanDb
+import clean.app.data.open
 import clean.app.data.Kv
 import clean.app.data.Repo
 import clean.core.PrKind
@@ -26,6 +30,7 @@ import org.robolectric.annotation.GraphicsMode
  * is made, the start and end can be changed, Save replaces the workout and its PRs follow, Discard leaves it as it was, and a
  * correction left in the workout in progress by an older version moves to the Correct page.
  */
+@Category(Regression::class)
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = "w400dp-h800dp-mdpi")

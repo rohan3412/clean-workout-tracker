@@ -1,0 +1,61 @@
+# XcodeGen spec: `xcodegen generate` in this folder writes Clean.xcodeproj (not committed). Needs a Mac with Xcode 15 or later.
+#
+#   xcodegen generate
+#   xcodebuild -project Clean.xcodeproj -scheme Clean -configuration Release -sdk iphoneos \
+#     CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+#
+# The Kotlin side is the `Shared` framework from ../shared; the pre-build script below makes it with Gradle (JDK 17 or later on the PATH).
+# PRODUCT_BUNDLE_IDENTIFIER is a build setting: Sideloadly (or Xcode) re-signs the app with the user's own team and may change it.
+name: Clean
+
+options:
+  bundleIdPrefix: app.clean
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    # Cross-compiled Kotlin has no bitcode and no x86_64 simulator slice (Apple silicon and iPhones only).
+    EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
+
+targets:
+  Clean:
+    type: application
+    platform: iOS
+    sources:
+      - path: Clean
+        excludes:
+          - Info.plist
+      # The two text files the app reads at run time (the exercise library's text and "What's new"); the same files Android has as assets.
+      - path: ../app/src/main/assets
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_NAME: Clean
+        PRODUCT_BUNDLE_IDENTIFIER: app.clean.ios
+        INFOPLIST_FILE: Clean/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # One alternate icon for each theme but Graphite, which is the app's own icon (IosHost.ICONS in the Kotlin code names them).
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIcon-Ember AppIcon-Crimson AppIcon-Moss AppIcon-Ocean AppIcon-Plum AppIcon-Ice AppIcon-Rose"
+        # embedAndSignAppleFrameworkForXcode puts the framework here.
+        FRAMEWORK_SEARCH_PATHS: "$(inherited) $(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
+        OTHER_LDFLAGS: "$(inherited) -framework Shared"
+    preBuildScripts:
+      - name: Build the Shared framework (Gradle)
+        basedOnDependencyAnalysis: false
+        script: |
+          if [ "YES" = "$OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED" ]; then
+            echo "Skipping the Gradle build: Kotlin is built by the IDE"
+            exit 0
+          fi
+          cd "$SRCROOT/.."
+          ./gradlew :shared:embedAndSignAppleFrameworkForXcode

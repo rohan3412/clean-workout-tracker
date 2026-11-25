@@ -12,4 +12,9 @@ Landroidx/compose/material3/**;
 # The database and the flows every screen reads.
 HSPLandroidx/room/**->**(**)**
 Landroidx/room/**;
+# Haze draws the dock's and the rest panel's blur on every frame they are in view; the lifecycle and activity classes run before the first frame.
+HSPLdev/chrisbanes/haze/**->**(**)**
+Ldev/chrisbanes/haze/**;
+HSPLandroidx/lifecycle/**->**(**)**
+Landroidx/lifecycle/**;
 HSPLkotlinx/coroutines/flow/**->**(**)**

@@ -1,4 +1,4 @@
-"""Writes core/src/main/kotlin/clean/core/OpenGymIds.kt: openGym's built-in exercise ids and the name Clean
+"""Writes core/src/commonMain/kotlin/clean/core/OpenGymIds.kt: openGym's built-in exercise ids and the name Clean
 gives each exercise. Only names are read from the dataset (facts); see README.md for how to run it."""
 import collections, json, re, sys
 
@@ -26,7 +26,7 @@ def key(s):
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
-names = table_names(root + "/core/src/main/kotlin/clean/core/Library.kt") + table_names(root + "/core/src/main/kotlin/clean/core/LibraryMore.kt")
+names = table_names(root + "/core/src/commonMain/kotlin/clean/core/Library.kt") + table_names(root + "/core/src/commonMain/kotlin/clean/core/LibraryMore.kt")
 # base key -> [(equipment key, full name)]; a name without equipment has the equipment key "".
 by_base = collections.defaultdict(list)
 for full in names:
@@ -80,7 +80,7 @@ if "--review" in sys.argv:
 def kotlin(s):
     return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("$", "\$")
 
-with open(root + "/core/src/main/kotlin/clean/core/OpenGymIds.kt", "w", encoding="utf-8", newline="\n") as out:
+with open(root + "/core/src/commonMain/kotlin/clean/core/OpenGymIds.kt", "w", encoding="utf-8", newline="\n") as out:
     out.write("package clean.core\n\n/*\n * openGym names its built-in exercises by id only. This table (id to the name Clean uses) was made by\n * tools/opengym_ids/build.py from the names in the open dataset openGym ships; a name that matches no library\n * exercise is the dataset's own, capitalised. Names are facts; nothing else is taken.\n */\n")
     out.write("internal val OPENGYM_IDS: Map<String, String> = mapOf(\n")
     for id_, full in sorted(mapping.items()):

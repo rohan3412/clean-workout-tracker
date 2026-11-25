@@ -1,7 +1,25 @@
 # What's new in Clean
 
 One section per version, newest first, as `## <versionName> (<date>)`, then one `- Title: sentence` line per change. The app
-shows the section of the version it is once after an update (one swipe per change) and every section under Settings, Credits.
+shows the section of the version it is once after an update, as a page: the first six changes are its highlights (a picture chosen by the title's first word, see `highlightIcon`), the rest and every earlier version are under "See everything" and in Settings, About.
+
+## 1.1.0 (2026-11-23)
+- Look: Eight themes, in Dark or Light, with frosted bars and sheets and one accent colour for what matters.
+- Cards open into pages: Tap a card and it grows into its page. Back shrinks it home, and the numbers and charts travel with it.
+- Hold to peek: Press and hold a day, a workout, a bar or a muscle to see what is behind it, then let go.
+- Logging: A number pad of its own, a rest bar you can swipe away, Undo for what you remove, and a light buzz as each set is done.
+- Progress: Trends, personal bests, trophies, a PR timeline and a year in review, all close to hand.
+- Performance: Settings, Appearance, Performance trims blur and animation for slower phones, in three steps.
+- Photos: Progress photos and snapshots are one Photos section on Profile, with filters, labels, Compare for progress photos and one Add.
+- Home: Up next, the week's ring, your weight line and your last workout, in the order you arrange them.
+- Activity: One calendar of every training day, scrolling back to your first.
+- Body: The figure shows what you trained today; hold a muscle for a closer look.
+- Records: Every PR is the accent colour, and each exercise has a PR history you can scroll through.
+- Search: Pull the Library or History down, or tap the search icon, to find things quickly.
+- Finishing: A summary after each workout with your records and badges, and a card to share.
+- Buzzes: One small set of haptics everywhere: a tick for choosing, a firm one for done, a heavy one for a record.
+- Readable colours: Text and charts were checked in every theme, and colours that mean something never sit close to your accent.
+- Colour-blind safe: A switch trades green and red for blue and orange.
 
 ## 1.0.4
 - Moving around: Every card and row grows into the page it opens, and what is on both travels to its new place.

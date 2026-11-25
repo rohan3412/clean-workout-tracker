@@ -1,10 +1,12 @@
 package clean.app
 
+import org.junit.experimental.categories.Category
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 /** A card keeps its key through moves and edits, even with the same exercise there twice. */
+@Category(Regression::class)
 class CardKeysTest {
     @Test
     fun `same exercise twice gets two keys that move with their cards`() {

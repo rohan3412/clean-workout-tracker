@@ -135,7 +135,7 @@ def main():
     review_path = Path(sys.argv[sys.argv.index("--review") + 1]) if "--review" in sys.argv else None
     here = Path(__file__).resolve().parent
 
-    core = root / "core/src/main/kotlin/clean/core"
+    core = root / "core/src/commonMain/kotlin/clean/core"
     library = constants(core / "Library.kt")
     hand = table_names(library["TABLE"])
     more = []

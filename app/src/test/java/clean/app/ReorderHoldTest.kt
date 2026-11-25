@@ -1,5 +1,8 @@
 package clean.app
 
+import org.junit.experimental.categories.Category
+import clean.app.android.*
+
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -15,6 +18,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import clean.app.data.CleanDb
+import clean.app.data.open
 import clean.app.data.Kv
 import clean.app.data.Repo
 import clean.core.SetType
@@ -31,6 +35,7 @@ import org.robolectric.annotation.GraphicsMode
  * Holding an exercise's name in a workout and dragging moves it, with the name's swipe-to-remove on (the default): the swipe going away
  * as the cards fold must not drop the hold. Run on the real app.
  */
+@Category(Regression::class)
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = "w400dp-h800dp-mdpi")
@@ -63,9 +68,12 @@ class ReorderHoldTest {
         javax.imageio.ImageIO.write(strip, "png", java.io.File("build/motion-frames/$name.png"))
     }
 
-    /** Where an exercise's name is (its text), or null when it is not on the screen. */
+    /**
+     * Where an exercise's name is (its text), or null when it is not on the screen. A card the list has composed ahead (prefetched) but not
+     * placed yet is in the tree with no size at the origin; it is not on the screen, so it is left out (that made "folded order" fail).
+     */
     private fun nameTop(name: String) = compose.onAllNodes(hasText(name), useUnmergedTree = true).fetchSemanticsNodes().firstOrNull()
-        ?.boundsInRoot?.let { it.top }
+        ?.boundsInRoot?.takeIf { it.width > 0f && it.height > 0f }?.top
 
     private fun open(exercises: List<String> = names): Pair<ActivityScenario<MainActivity>, AppModel> {
         runBlocking {
@@ -153,7 +161,7 @@ class ReorderHoldTest {
 
     @Test fun `holding the middle name keeps it there`() = holdStays("hold-middle", eight[3], 3)
 
-    @Test fun `a tap on the list closes the number pad and does nothing else`() {
+    @Test fun `a tap on the list closes the number pad and the tap still reaches what is under it`() {
         val (scenario, model) = open(eight)
         compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("weight", substring = true, ignoreCase = true), useUnmergedTree = true)[0].performClick()
         compose.waitForIdle()
@@ -161,19 +169,19 @@ class ReorderHoldTest {
         val before = model.draft
         fun padUp() = compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("Close keyboard"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         assertEquals("the pad is up", true, padUp())
-        // On the second exercise's name: a tap there would open its page if it acted.
+        // Round 27: on the second exercise's name, which opens its page: the tap closes the pad and is not taken from the name.
         val screen = model.stack.toList()
         compose.onAllNodes(hasText(eight[1]), useUnmergedTree = true)[0].performTouchInput { click(center) }
         compose.waitForIdle()
         shots += frame()
         save("pad-tap-away", shots)
         assertEquals("the pad closed", false, padUp())
-        assertEquals("nothing else happened", screen, model.stack.toList())
+        assertEquals("the name opened its page as a tap on it always does", screen.size + 1, model.stack.size)
         assertEquals("the draft is as it was", before, model.draft)
         scenario.close()
     }
 
-    @Test fun `a swipe on the list closes the number pad at touch down and still scrolls`() {
+    @Test fun `a swipe on the list leaves the number pad up and still scrolls`() {
         val (scenario, _) = open(eight)
         compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("weight", substring = true, ignoreCase = true), useUnmergedTree = true)[0].performClick()
         compose.waitForIdle()
@@ -182,15 +190,15 @@ class ReorderHoldTest {
         val before = nameTop(eight[1])
         val node = compose.onAllNodes(hasText(eight[0]), useUnmergedTree = true)[0]
         node.performTouchInput { down(center) }
-        // The pad goes away as soon as the finger is down, before it has moved at all.
+        // Round 27: the pad is left alone while the finger is down and moving: only a tap closes it, when the finger lifts.
         compose.mainClock.advanceTimeBy(300)
-        assertEquals("closed at touch down", false, padUp())
+        assertEquals("still up at touch down", true, padUp())
         node.performTouchInput {
             repeat(10) { moveBy(Offset(0f, -30f)) }
             up()
         }
         compose.waitForIdle()
-        assertEquals("the pad is gone", false, padUp())
+        assertEquals("a scroll does not close the pad", true, padUp())
         val after = nameTop(eight[1])
         assert(before != null && (after == null || after < before!! - 100)) { "the list scrolled under the swipe: $before -> $after" }
         scenario.close()

@@ -1,5 +1,6 @@
 package clean.app
 
+import org.junit.experimental.categories.Category
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.TweenSpec
 import androidx.compose.animation.core.VectorConverter
@@ -9,6 +10,7 @@ import org.junit.Test
 import java.io.File
 
 /** The blink's clock: out then in, never both above 10 %, about 150 ms in all; the window animations in res/anim say the same. */
+@Category(Regression::class)
 class MotionClockTest {
     private fun TweenSpec<Float>.at(ms: Int): Float =
         vectorize(Float.VectorConverter).getValueFromNanos(ms * 1_000_000L, AnimationVector1D(0f), AnimationVector1D(1f), AnimationVector1D(0f)).value

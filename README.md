@@ -53,9 +53,14 @@ The base is `VERSION_CODE` at the top of `app/build.gradle.kts`; raise it by one
 
 `.github/workflows/build.yml` runs the core tests and builds the release APKs on every push and pull request, and uploads them as the `clean-apks` artifact of the run. To make those APKs install over the app already on the phone, add a repository secret `DEBUG_KEYSTORE_BASE64` holding the base64 of the same `debug.keystore`; without it they are signed with a throwaway key.
 
-## iOS (later)
+## iOS
 
-Not built. The plan is to make `core/` Kotlin Multiplatform first, then the screens with Compose Multiplatform, with widgets and Live Activities in SwiftUI, installed by sideloading. An `iosApp/` folder would sit beside `app/`; the `.gitignore` already leaves out Xcode's per-user and build files.
+The same app runs on iPhone: `core/` is Kotlin Multiplatform, the screens and the data layer are in `shared/` (Compose
+Multiplatform), and `iosApp/` is the small Swift host. iOS apps can only be built on a Mac, so the `ios` job in
+`.github/workflows/build.yml` builds it on a macOS runner and uploads an unsigned `Clean-unsigned.ipa` as the `clean-ios`
+artifact, with simulator screenshots as `clean-ios-screens`. It is installed by sideloading with the phone owner's own Apple ID;
+see `docs/ios-sideload.md`. What differs from Android (no Health, no home-screen widgets) is in the "Platform" section of
+`docs/design.md`.
 
 ## Licence
 

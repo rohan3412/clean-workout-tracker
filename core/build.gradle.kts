@@ -1,28 +1,35 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    alias(libs.plugins.kotlin.jvm)
-}
-
-java {
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
+    alias(libs.plugins.kotlin.multiplatform)
 }
 
 kotlin {
-    compilerOptions {
-        jvmTarget = JvmTarget.JVM_11
+    compilerOptions { optIn.add("kotlin.time.ExperimentalTime"); freeCompilerArgs.add("-Xexpect-actual-classes") }
+    jvm {
+        compilerOptions {
+            jvmTarget = JvmTarget.JVM_11
+        }
+    }
+    iosArm64()
+    iosSimulatorArm64()
+
+    sourceSets {
+        commonMain.dependencies {
+            api(libs.kotlinx.datetime)
+        }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
+        jvmTest.dependencies {
+            implementation(libs.junit)
+        }
     }
 }
 
-dependencies {
-    testImplementation(kotlin("test"))
-    testImplementation(libs.junit)
-}
-
-tasks.test {
-    // The data path timings (customization/speed-pass.md) load the machine; they run only when asked: CLEAN_SPEED=1 ./gradlew :core:test
-    if (System.getenv("CLEAN_SPEED") == null) exclude("**/DataPathSpeedTest*")
+tasks.withType<Test>().configureEach {
+    // The data path timings (customization/speed-pass.md) load the machine; they run only when asked: CLEAN_SPEED=1 ./gradlew :core:jvmTest
+    if (System.getenv("CLEAN_SPEED") == null) { exclude("**/DataPathSpeedTest*"); exclude("**/ScreenPathSpeedTest*") }
     testLogging {
         events("passed", "skipped", "failed")
         showStandardStreams = true

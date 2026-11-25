@@ -1,11 +1,15 @@
 package clean.app
 
+import org.junit.experimental.categories.Category
+import clean.app.android.*
+
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import clean.app.data.CleanDb
+import clean.app.data.open
 import clean.app.data.Kv
 import clean.app.data.Repo
 import kotlinx.coroutines.runBlocking
@@ -18,6 +22,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /** The summary after a workout lists its exercises and their sets, as the workout's page does. */
+@Category(Regression::class)
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = "w400dp-h3000dp-mdpi")

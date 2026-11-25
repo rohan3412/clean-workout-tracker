@@ -161,7 +161,7 @@ Settings, Data, "Back up everything" writes one zip; it is Clean's own and nothi
 
 - `clean-backup.json`: `{"format":"clean-backup","version":1,"db":9,"created":"2026-10-12T10:30:00","app":"1.0"}`. `db` is Room's schema version (`DB_VERSION`).
 - `clean.db`: the app's SQLite file as it is on the phone, copied after `PRAGMA wal_checkpoint(TRUNCATE)`. Because the file itself is the backup, every table (rows as text, measurements, settings, templates, kv with every option, program, home cards, rename log and the workout in progress) is in it unchanged, and a restore leaves every stored value byte-identical. An older backup is brought up to date by Room's migrations when the restored file is first opened.
-- `files/...`: from the app's `filesDir`, only the imported font (`files/font-*`), `files/animations/` (when the dialog's switch is on), and `files/photos/` and `files/places/` (kept for the features that will use them; absent now).
+- `files/...`: from the app's `filesDir`, only the imported font (`files/font-*`), `files/animations/` (when the dialog's switch is on), `files/photos/`, `files/places/` and `files/avatars/` (the profile pictures).
 
 Restore rules: the zip is copied to the cache and inspected without changing anything; a missing or wrong manifest, a `db` or `version` above what this app knows ("made by a newer version of Clean") or a missing or unreadable `clean.db` is refused with a sentence. After a confirm, `clean.db` and the allowed `files/` entries are extracted into a staging folder in the cache (an entry that is not the manifest, `clean.db` or one of those paths, or whose normalised path leaves the staging folder, is ignored), and only then are the database closed, its `-wal` / `-shm` files removed and the files swapped in: the phone's font, photos and places are replaced by the backup's (or removed when it has none), animations only when the backup carries them. The app then restarts in a new process. Nothing is written to Health Connect. Delete everything removes the database and those same files and clears the cache, then restarts.
 
@@ -172,6 +172,10 @@ Not in any CSV and not in the database: one JPEG per photo under the app's priva
 A photo comes in decoded, turned upright by its EXIF orientation, scaled so that its longer side is at most 2048 px, and written as JPEG at quality 88 with no EXIF at all (no location is kept). A photo chosen from the phone is dated by its EXIF `DateTimeOriginal` (`yyyy:MM:dd HH:mm:ss`) when it has a valid one, else now; one taken with the camera is dated now. A deleted photo is moved to `cache/photo-removed/` for ten seconds so that the Undo can bring it back, then removed.
 
 The backup zip carries the folder as `files/photos/<profileId>/<name>.jpg`: restore accepts any path of two or more parts under `photos/` (checked against the code in `Backup.apply`: a nested `photos/<id>/…` entry is extracted into the staging folder and swapped in whole), and the phone's own photos are replaced by the backup's (or removed when it has none). Deleting a profile removes its photo folder; Delete everything removes `photos/`. Profile ids are those of the database being restored, so photos follow their profile.
+
+## The profile picture (2026-11-19)
+
+Not in any CSV: one square JPEG per profile, `files/avatars/<profileId>.jpg`, chosen with the system photo picker, turned upright by its EXIF orientation, cut to the centred square, scaled to at most 512 px and written as JPEG at quality 90 with no EXIF. The backup zip carries it as `files/avatars/<profileId>.jpg` (the folder is replaced by the backup's, or removed when it has none, like `photos/`); deleting a profile deletes its file and Delete everything removes `avatars/`. Profile ids are those of the database being restored, so a picture follows its profile.
 
 ## Templates file
 
@@ -184,3 +188,23 @@ Clean's own format, since Strong has none. One JSON file holds every template of
 `targets` is optional, on a block: one entry per set by position, `[weightKg, reps]` with `null` for a part that is missing, and `null` for a set with no values (a shorter list means none for the rest; a block with none has no key, and older files import with none). The weight is always kilograms, whatever the unit shown. A left and right exercise has one set and one target per pair.
 
 On import, an exercise name the profile already has is used as it is. For any other name the user chooses, per exercise, to create it or to use one of their own exercises instead. Nothing is matched by similarity.
+
+## Moments (2026-11-19)
+
+Not in any CSV or the database. One JPEG per picture under `files/moments/<profileId>/`, named `yyyyMMdd-HHmmss_<8 hex>.jpg`: the moment it was taken (the EXIF `DateTimeOriginal`, else the time it was added) and a random id; the name is the whole record. A picture is turned upright, scaled to at most 2048 px on its longer side and written as JPEG quality 88 with no EXIF (no location). Taken from the system photo picker. The backup zip carries `files/moments/` (replaced by the backup's, or removed when it has none, like `photos/`); deleting a profile deletes its folder; Delete everything removes `moments/`. A deleted picture waits in `cache/moment-removed/` until its Undo has passed.
+
+## Workout tags (2026-11-19, round 7)
+
+A tag is a short free-text word on a workout (`Deload`, `Sick`). It is Clean's own data and is **never written to the Strong CSV**: no column carries it, so the export stays byte-identical (checked in `Round7AppTest`). It lives in the `kv` table, so it needs no migration and is in the backup zip with the rest of the database.
+
+- `tag:<profileId>:<workout start>` = the tag (the start is the workout's `Date` text, `yyyy-MM-dd HH:mm:ss`, which is how a workout is told apart everywhere). One tag per workout; no key means no tag, which is the default and never asked for. Tidied with `cleanTag` (trimmed, runs of spaces made one, at most 24 characters); typing a tag that matches one in use ignoring case takes the spelling in use (`spellTag`).
+- `tag.out:<profileId>:<tag>` = `on` when that tag is switched to "Leave out of stats" (default: absent, off).
+- A correction that moves a workout's start moves its tag with it; deleting a workout leaves its key (so Undo brings the tag back), and a tag whose workout is gone is not suggested (`tagsByUse`). Deleting the profile removes both prefixes.
+- While a workout runs its tag is `Draft.tag` (in the stored draft JSON as `tag`, when set) and is written under the key above when the workout is saved.
+- Leaving out of stats is one rule in one place: `AppModel.workouts` is `AppModel.allWorkouts` less the workouts whose tag is switched out (`statWorkouts`, core), and every statistic, record, streak, calendar and Home card reads `workouts`. History, a workout's own page, the summary, the backup count and the Health Connect send read `allWorkouts`, so a left-out workout is still listed and can be opened and edited.
+
+## The scheduled backup (2026-11-19, round 7)
+
+Settings, Data, Backup, "Automatic backup" writes the manual backup's zip into a folder the user picked (`OpenDocumentTree`, with a persistable permission), without the imported animations. Name: `Clean auto backup 2026-11-19 0930.zip`; after each one only the newest five files with that name pattern stay (`autoBackupsToDelete`, so anything else in the folder is never touched). WorkManager runs it daily or weekly when the battery is not low. kv: `autobackup.folder` (the tree's Uri), `autobackup.freq` (`daily` or `weekly`, absent for off), `autobackup.last` (a stored date), `autobackup.error` (absent when the last run was good).
+
+Round 39 (2026-11-25): the Photos section shows progress photos and moments together, but the two stores are exactly as above (`photos/<id>/` and `moments/<id>/`, the same names, the same backup folders). Changing a picture's kind in the app is a rename of its file from one folder to the other (a photo's name gets a pose, a moment's an 8 hex id); the backup and restore need nothing new.

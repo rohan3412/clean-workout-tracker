@@ -1,5 +1,6 @@
 package clean.app
 
+import org.junit.experimental.categories.Category
 import clean.core.Side
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -7,6 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** The figure's outlines know which limb they are: a muscle or head drawn on one side has the same number on the other. */
+@Category(Regression::class)
 class BodyPathsTest {
     @Test
     fun `each muscle and head has as many outlines on the left as on the right`() {

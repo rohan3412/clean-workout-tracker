@@ -1,6 +1,6 @@
 # openGym exercise ids
 
-openGym's backup names a built-in exercise by id only. `build.py` writes `core/src/main/kotlin/clean/core/OpenGymIds.kt`,
+openGym's backup names a built-in exercise by id only. `build.py` writes `core/src/commonMain/kotlin/clean/core/OpenGymIds.kt`,
 the table from id to the name Clean uses. It reads the names in openGym's exercise list (the open dataset
 `LibraryMore.kt` was generated from; names are facts) and the library tables in `Library.kt` and `LibraryMore.kt`.
 

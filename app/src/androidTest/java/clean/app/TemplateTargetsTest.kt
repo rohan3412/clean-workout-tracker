@@ -4,7 +4,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import clean.core.SetTarget
 import clean.core.SetType
 import clean.core.TemplateBlock
-import org.json.JSONArray
+import clean.app.data.JSONArray
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith

@@ -1,5 +1,6 @@
 package clean.app
 
+import org.junit.experimental.categories.Category
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import clean.app.ui.theme.resolveLook
@@ -8,6 +9,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Chart lines and sticky notes read on Light as well as on Dark. */
+@Category(Regression::class)
 class LightColoursTest {
     private fun contrast(a: Color, b: Color): Float {
         val (hi, lo) = listOf(a.luminance(), b.luminance()).sortedDescending()

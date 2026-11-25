@@ -25,3 +25,4 @@ dependencyResolutionManagement {
 rootProject.name = "Clean"
 include(":app")
 include(":core")
+include(":shared")

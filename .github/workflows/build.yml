@@ -14,7 +14,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -57,7 +57,24 @@ jobs:
         run: chmod +x gradlew
 
       - name: Unit tests
-        run: ./gradlew :core:test --no-daemon
+        run: ./gradlew :core:jvmTest --no-daemon
+
+      # The regression suite: Robolectric tests that guard a bug or complaint once fixed (they carry
+      # @Category(Regression::class)). Robolectric fetches its Android jar here; CI=true makes the build run one test fork at a time
+      # and try a failed test again up to twice, since a Robolectric launch can time out under load.
+      - name: Regression tests
+        id: regression
+        run: ./gradlew :app:testDebugUnitTest -Pregression --no-daemon
+
+      - name: Regression test reports
+        if: failure() && steps.regression.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-test-reports
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/
+          if-no-files-found: warn
 
       - name: Build release APKs
         run: ./gradlew :app:assembleRelease --no-daemon
@@ -67,3 +84,86 @@ jobs:
           name: clean-apks
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+  # The iPhone build: an unsigned .ipa for sideloading (Sideloadly or AltStore sign it with the owner's Apple ID; see docs/ios-sideload.md),
+  # plus screenshots from the iOS simulator. iOS apps can only be built on macOS, hence this runner.
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: XcodeGen
+        run: brew install xcodegen
+
+      - name: Core tests on the iOS simulator
+        run: ./gradlew :core:iosSimulatorArm64Test --no-daemon
+
+      - name: Generate the Xcode project
+        working-directory: iosApp
+        run: xcodegen generate
+
+      - name: Build for iPhone (unsigned)
+        working-directory: iosApp
+        run: |
+          xcodebuild -project Clean.xcodeproj -scheme Clean -configuration Release -sdk iphoneos             -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+
+      - name: Package the .ipa
+        working-directory: iosApp
+        run: |
+          mkdir -p ipa/Payload
+          cp -R build/Build/Products/Release-iphoneos/Clean.app ipa/Payload/
+          (cd ipa && zip -qry ../Clean-unsigned.ipa Payload)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clean-ios
+          path: iosApp/Clean-unsigned.ipa
+          if-no-files-found: error
+
+      - name: Build for the simulator
+        working-directory: iosApp
+        run: |
+          xcodebuild -project Clean.xcodeproj -scheme Clean -configuration Debug -sdk iphonesimulator             -destination 'generic/platform=iOS Simulator' -derivedDataPath build-sim CODE_SIGNING_ALLOWED=NO build
+
+      # Opens the app, then each tab through the clean:// links, and photographs the screen each time.
+      - name: Simulator screenshots
+        working-directory: iosApp
+        run: |
+          set -x
+          DEVICE=$(xcrun simctl list devices available | grep -m1 -E "iPhone 1[5-9]( Pro)? \(" | grep -oE "[0-9A-F-]{36}")
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl install "$DEVICE" build-sim/Build/Products/Debug-iphonesimulator/Clean.app
+          BUNDLE=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" build-sim/Build/Products/Debug-iphonesimulator/Clean.app/Info.plist)
+          mkdir -p screens
+          xcrun simctl launch "$DEVICE" "$BUNDLE"
+          sleep 15
+          xcrun simctl io "$DEVICE" screenshot screens/01-launch.png
+          n=2
+          for tab in home workout progress history profile; do
+            xcrun simctl openurl "$DEVICE" "clean://open?tab=$tab" || true
+            sleep 4
+            xcrun simctl io "$DEVICE" screenshot "screens/0$n-$tab.png"
+            n=$((n+1))
+          done
+          xcrun simctl openurl "$DEVICE" "clean://weight" || true
+          sleep 4
+          xcrun simctl io "$DEVICE" screenshot screens/08-weight.png
+          xcrun simctl spawn "$DEVICE" log show --last 3m --predicate 'process == "Clean"' --style compact > screens/app-log.txt || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: clean-ios-screens
+          path: iosApp/screens/

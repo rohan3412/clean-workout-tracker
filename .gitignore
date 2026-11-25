@@ -54,3 +54,13 @@ __pycache__/
 hs_err_pid*.log
 replay_pid*.log
 
+
+# Knowledge graph (rebuilt locally by graphify)
+graphify-out/
+
+iosApp/Clean.xcodeproj/
+iosApp/build/
+iosApp/build-sim/
+iosApp/ipa/
+iosApp/*.ipa
+iosApp/screens/

@@ -1,10 +1,14 @@
 package clean.app
 
+import org.junit.experimental.categories.Category
+import clean.app.android.*
+
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import clean.app.data.CleanDb
+import clean.app.data.open
 import clean.app.data.Kv
 import clean.app.data.Repo
 import clean.core.ISO_ROW
@@ -20,6 +24,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /** The Iso-Lateral Row history fix runs by itself once at start-up (no page any more), and never again once marked done. */
+@Category(Regression::class)
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [35], qualifiers = "w400dp-h800dp-mdpi")

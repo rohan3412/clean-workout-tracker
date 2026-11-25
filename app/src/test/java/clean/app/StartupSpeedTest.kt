@@ -1,9 +1,13 @@
 package clean.app
 
+import clean.app.android.*
+
+import clean.core.time.*
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import clean.app.data.CleanDb
+import clean.app.data.open
 import clean.app.data.Kv
 import clean.app.data.MeasurementEntity
 import clean.app.data.Repo
@@ -19,7 +23,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
-import java.time.LocalDate
+import kotlinx.datetime.LocalDate
 
 /**
  * Timings of the real app on the JVM (Robolectric) over a made-up log of three years, four workouts a week: from launch until the

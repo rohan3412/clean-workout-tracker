@@ -12,14 +12,14 @@ class ScreenCodecTest {
     private val pages = listOf(
         Screen.Active, Screen.Settings, Screen.ExerciseSetup, Screen.Chart, Screen.Trends, Screen.Bmi, Screen.Trophies, Screen.Program,
         Screen.PersonalBests, Screen.History, Screen.Body, Screen.Measurements,
-        Screen.Photos, Screen.Profile,
+        Screen.Photos, Screen.Moments,
         Screen.TemplateEdit(null), Screen.TemplateEdit(12), Screen.WorkoutDetail("2026-10-01 18:00:00"),
         Screen.ExerciseDetail("Bench Press (Barbell)"), Screen.ExerciseDetail("Squat  ", edit = true, tab = 2),
         Screen.Summary("2026-10-01 18:00:00"), Screen.Week("2026-09-28"), Screen.MeasurementDetail("weight.csv"),
         Screen.MuscleDetail(Muscle.entries.first()), Screen.HeadDetail(Head.entries.last()), Screen.Routine("Push, A"),
         Screen.TemplateStats(3), Screen.Month("2026-09"), Screen.PrTimeline("Deadlift"), Screen.Calendar(), Screen.Calendar("2026-09-03"),
-        Screen.Overall("Row"), Screen.NoteReview(), Screen.NoteReview("Row"), Screen.Photo("20261001-080000_front.jpg", Pose.entries.first()),
-        Screen.Photo("x.jpg", null), Screen.PhotoCompare(null), Screen.PhotoCompare(Pose.entries.last()),
+        Screen.Overall("Row"), Screen.NoteReview(), Screen.NoteReview("Row"), Screen.Photo("20261001-080000_front.jpg", clean.core.PhotoFilter.FRONT),
+        Screen.Photo("x.jpg", clean.core.PhotoFilter.ALL), Screen.Photo("y.jpg", clean.core.PhotoFilter.SNAPSHOTS), Screen.PhotoCompare(null), Screen.PhotoCompare(Pose.entries.last()),
     )
 
     @Test

@@ -1,4 +1,10 @@
 <resources>
     <string name="app_name">Clean</string>
     <string name="widget_today_description">Today\'s template with a Start button, the days of this week and the week streak.</string>
+    <string name="widget_week_description">This week\'s workouts against your weekly target, and the weeks in a row you met it.</string>
+    <string name="widget_start_description">Starts an empty workout, or goes back to the one in progress.</string>
+    <string name="widget_last_description">Your last workout and how long ago it was; opens it.</string>
+    <string name="widget_next_description">The template that comes next in your program or split; a tap starts it.</string>
+    <string name="widget_days_description">The last seven days as dots, filled on the days you trained.</string>
+    <string name="widget_restdays_description">How long it has been since your last workout.</string>
 </resources>

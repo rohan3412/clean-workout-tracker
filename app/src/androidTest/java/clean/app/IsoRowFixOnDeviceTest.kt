@@ -1,10 +1,13 @@
 package clean.app
 
+import clean.app.android.*
+
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import clean.app.data.CleanDb
+import clean.app.data.open
 import clean.app.data.Repo
 import clean.core.ISO_ROW
 import clean.core.ISO_ROW_WIDE

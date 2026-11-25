@@ -1,10 +1,12 @@
 package clean.app
 
+import org.junit.experimental.categories.Category
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Back on a root tab goes to Home first; on Home, or with a page open, it does what it did before. */
+@Category(Regression::class)
 class BackHomeTest {
     @Test
     fun `back goes home from every other tab`() {

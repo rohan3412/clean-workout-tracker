@@ -1,8 +1,11 @@
 package clean.app
 
+import clean.app.android.*
+
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import clean.app.data.CleanDb
+import clean.app.data.open
 import clean.app.data.DB_VERSION
 import clean.app.data.Kv
 import clean.app.data.Repo

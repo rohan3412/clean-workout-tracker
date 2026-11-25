@@ -1,9 +1,11 @@
 package clean.app
 
+import org.junit.experimental.categories.Category
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /** Steps taken one after another are taken back together by one Undo, newest first. */
+@Category(Regression::class)
 class UndosTest {
     @Test
     fun `two steps stack and one undo takes both back in reverse`() {
