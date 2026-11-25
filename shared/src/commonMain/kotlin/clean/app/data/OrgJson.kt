@@ -79,7 +79,9 @@ class JSONObject() {
     }
 
     companion object {
-        /** `JSONObject.NULL`: written as `null`. */
+        /** `JSONObject.NULL`: written as `null`. Named `nullValue` in the iOS framework's header, where `NULL` is C's macro and breaks the Swift build. */
+        @OptIn(kotlin.experimental.ExperimentalObjCName::class)
+        @kotlin.native.ObjCName("nullValue")
         val NULL: Any = Null
     }
 }
