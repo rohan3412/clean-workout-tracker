@@ -442,13 +442,13 @@ class Round26Test {
     }
 
     @Test fun whatsNewShowsOnceAfterAnUpdateAndContinueClosesIt() {
-        val s = launchRich(seenVersion = "1.0.4")
+        val s = launchRich(seenVersion = "1.0.3")
         compose.waitUntil(20_000) { model.whatsNew != null }
         see("Clean 1.1.0"); see("Continue"); see("See everything")
         assertEquals(6, highlightsOf(model.whatsNew!!).size)
         for (headline in highlightsOf(model.whatsNew!!).map { it.title }) see(headline)
         tap("See everything"); settle(600)
-        see("1.0.4"); see("Back to the highlights")
+        see("1.0.3"); see("Back to the highlights")
         tap("Continue"); settle(600)
         assertNull(model.whatsNew)
         assertEquals(0, textCount("Back to the highlights"))
