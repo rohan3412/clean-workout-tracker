@@ -45,6 +45,9 @@ private fun fail(message: String): Nothing = throw IllegalArgumentException(mess
 
 /** Inflates the raw deflate stream [length] bytes long at [from] in [src] to exactly [size] bytes. */
 fun inflateRaw(src: ByteArray, from: Int, length: Int, size: Int): ByteArray {
+    // An empty entry has nothing to inflate, and an empty array has no element whose address can be taken (on Kotlin/Native that is out of bounds).
+    if (size == 0) return ByteArray(0)
+    if (length <= 0 || from >= src.size) fail("A zip entry is damaged")
     val out = ByteArray(size)
     memScoped {
         val stream = alloc<z_stream>()

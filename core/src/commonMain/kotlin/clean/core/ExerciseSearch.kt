@@ -9,8 +9,22 @@ import kotlin.math.abs
  * equipment. Rules in `docs/design.md`, "Exercise search".
  */
 
-/** Lower case, split at every character that is not a letter or a digit. */
-fun searchWords(text: String): List<String> = text.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }
+/**
+ * Lower case, split at every character that is not a letter or a number (Unicode's L and N). A character test, not a regular expression:
+ * Kotlin/Native's regex has no \p{L} or \p{N}, so the pattern this was threw on iOS.
+ */
+fun searchWords(text: String): List<String> {
+    val words = ArrayList<String>()
+    val word = StringBuilder()
+    for (c in text.lowercase()) {
+        if (c.isLetter() || c.category in NUMBERS) word.append(c)
+        else if (word.isNotEmpty()) { words += word.toString(); word.clear() }
+    }
+    if (word.isNotEmpty()) words += word.toString()
+    return words
+}
+
+private val NUMBERS = setOf(CharCategory.DECIMAL_DIGIT_NUMBER, CharCategory.LETTER_NUMBER, CharCategory.OTHER_NUMBER)
 
 /** Shorthand and other words for a typed word, each a phrase whose words must all match. The typed word itself is always tried too. */
 private val SYNONYMS: Map<String, List<String>> = mapOf(
