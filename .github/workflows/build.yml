@@ -103,6 +103,13 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x gradlew
 
+      # Linking the release framework for the iPhone needs more than the 2 GB the project's gradle.properties allows (kept low for small
+      # PCs): this runner has 7 GB, and Gradle's user settings override the project's.
+      - name: More memory for Kotlin/Native
+        run: |
+          mkdir -p "${GRADLE_USER_HOME:-$HOME/.gradle}"
+          echo "org.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8" >> "${GRADLE_USER_HOME:-$HOME/.gradle}/gradle.properties"
+
       - name: XcodeGen
         run: brew install xcodegen
 
