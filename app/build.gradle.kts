@@ -103,6 +103,8 @@ android {
             if (project.hasProperty("regression")) { test.useJUnit { includeCategories("clean.app.Regression"); excludeCategories("clean.app.Tour") }; test.forkEvery = 1 }
             if (onCi) {
                 test.maxParallelForks = 1
+                // The test JVM's default heap is 512 MB, small for a Robolectric launch of the whole app; the runner has 16 GB.
+                test.maxHeapSize = "3g"
                 test.extensions.configure<org.gradle.testretry.TestRetryTaskExtension> { maxRetries.set(2); failOnPassedAfterRetry.set(false) }
             }
             if (deps == null) { if (!onCi) { test.exclude("**/MotionFramesTest*"); test.exclude("**/SummaryExercisesTest*"); test.exclude("**/ReorderHoldTest*"); test.exclude("**/StartupSpeedTest*"); test.exclude("**/ScreensTourTest*"); test.exclude("**/CorrectionTest*"); test.exclude("**/IsoFixOnceTest*") } }
